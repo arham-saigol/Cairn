@@ -67,6 +67,8 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
   ref,
 ) {
   const [draft, setDraft] = useState(card.content);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
@@ -80,10 +82,21 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
   }, [editing]);
 
   async function commit(): Promise<Card | undefined> {
+    if (savingRef.current) return undefined;
     const next = draft.trim();
     let updated: Card | void;
-    if (next && next !== card.content) updated = await onSave(next);
-    else {
+    if (next && next !== card.content) {
+      savingRef.current = true;
+      setSaving(true);
+      if (editorRef.current) editorRef.current.disabled = true;
+      try {
+        updated = await onSave(next);
+      } finally {
+        savingRef.current = false;
+        setSaving(false);
+        if (editorRef.current) editorRef.current.disabled = false;
+      }
+    } else {
       setDraft(card.content);
       updated = undefined;
     }
@@ -140,6 +153,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
           <textarea
             ref={editorRef}
             value={draft}
+            disabled={saving}
             onChange={(event) => setDraft(event.target.value)}
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}

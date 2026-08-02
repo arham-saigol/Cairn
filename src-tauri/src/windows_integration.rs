@@ -40,7 +40,7 @@ use windows::{
             },
             Input::KeyboardAndMouse::{
                 GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-                KEYEVENTF_KEYUP, VK_C, VK_CONTROL, VK_MENU, VK_SHIFT,
+                KEYEVENTF_KEYUP, VK_C, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
             },
             WindowsAndMessaging::{
                 GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
@@ -372,7 +372,7 @@ fn wait_for_modifiers_release() -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_millis(650);
     while Instant::now() < deadline {
         let pressed = unsafe {
-            [VK_CONTROL, VK_MENU, VK_SHIFT]
+            [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN]
                 .iter()
                 .any(|key| GetAsyncKeyState(key.0 as i32) < 0)
         };
@@ -381,7 +381,7 @@ fn wait_for_modifiers_release() -> Result<(), String> {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    Err("Release Ctrl, Alt, or Shift before capturing selected text.".into())
+    Err("Release Ctrl, Alt, Shift, or Win before capturing selected text.".into())
 }
 
 pub fn write_clipboard_text(text: &str) -> Result<(), String> {
