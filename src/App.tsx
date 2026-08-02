@@ -736,6 +736,7 @@ export default function App() {
         void copyCards(true, true);
         break;
       case "toggleAlwaysOnTop":
+        if (loading) break;
         if (settingsSaveTimer.current) {
           clearTimeout(settingsSaveTimer.current);
           settingsSaveTimer.current = null;
