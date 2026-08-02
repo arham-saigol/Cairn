@@ -21,8 +21,8 @@ use windows::{
                 COINIT_APARTMENTTHREADED,
             },
             DataExchange::{
-                CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-                OpenClipboard, SetClipboardData,
+                CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardOwner,
+                GetClipboardSequenceNumber, OpenClipboard, SetClipboardData,
             },
             Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
             Ole::{
@@ -386,12 +386,26 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
         while Instant::now() < deadline && GetClipboardSequenceNumber() == sequence {
             thread::sleep(Duration::from_millis(15));
         }
+        let changed = GetClipboardSequenceNumber() != sequence;
+        let clipboard_from_expected = changed
+            && GetClipboardOwner()
+                .ok()
+                .and_then(window_identity)
+                .zip(window_identity(expected_foreground))
+                .is_some_and(|((_, owner_process), (_, expected_process))| {
+                    owner_process == expected_process
+                });
         if GetForegroundWindow() != expected_foreground {
+            let restored = if clipboard_from_expected {
+                restore_clipboard()
+            } else {
+                Ok(())
+            };
             drop(original);
             OleUninitialize();
+            restored?;
             return Err("The foreground application changed during capture.".into());
         }
-        let changed = GetClipboardSequenceNumber() != sequence;
         let captured = if changed {
             // Give delayed-rendering clipboard owners a short moment after the sequence changes.
             thread::sleep(Duration::from_millis(20));
