@@ -225,10 +225,11 @@ pub fn run() {
             let snapshot = database.bootstrap().map_err(std::io::Error::other)?;
             let previous_window = PreviousWindow::default();
             if let Some(window) = app.get_webview_window("main") {
-                let cairn_hwnd = window_hwnd(&window).ok();
-                let anchor = previous_window.remember(cairn_hwnd);
+                let anchor = previous_window.remember(None);
                 let _ = position_rail(&window, anchor);
                 window.set_always_on_top(snapshot.settings.always_on_top)?;
+                window.show()?;
+                window.set_focus()?;
             }
             let shortcuts = ShortcutService::start(app.handle().clone(), &snapshot.settings)
                 .map_err(std::io::Error::other)?;

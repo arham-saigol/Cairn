@@ -1,7 +1,9 @@
 use std::{
     mem::size_of,
     path::Path,
-    ptr, thread,
+    ptr,
+    sync::atomic::{AtomicBool, Ordering},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -54,6 +56,15 @@ const RAIL_OFFSET: i32 = 12;
 const MIN_RAIL_WIDTH: i32 = 340;
 const MIN_RAIL_HEIGHT: i32 = 480;
 const UIA_TIMEOUT: Duration = Duration::from_millis(1500);
+static UIA_WORKER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+struct UiaWorkerGuard;
+
+impl Drop for UiaWorkerGuard {
+    fn drop(&mut self) {
+        UIA_WORKER_ACTIVE.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SourceContext {
@@ -200,13 +211,20 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
 }
 
 fn selected_text_uia() -> Result<String, String> {
+    if UIA_WORKER_ACTIVE.swap(true, Ordering::AcqRel) {
+        return Err("A previous UI Automation capture is still running.".into());
+    }
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    thread::Builder::new()
+    if let Err(error) = thread::Builder::new()
         .name("cairn-uia-capture".into())
         .spawn(move || {
+            let _guard = UiaWorkerGuard;
             let _ = sender.send(selected_text_uia_sta());
         })
-        .map_err(|error| error.to_string())?;
+    {
+        UIA_WORKER_ACTIVE.store(false, Ordering::Release);
+        return Err(error.to_string());
+    }
     receiver
         .recv_timeout(UIA_TIMEOUT)
         .map_err(|_| "UI Automation did not respond in time.".to_string())?
