@@ -306,8 +306,23 @@ fn configure_shortcuts(
                 state.chorded.clear();
                 state.last_release = None;
             }
-            let _ = register_map(previous, registrations, hook_available);
-            Err(error)
+            match register_map(previous, registrations, hook_available) {
+                Ok(()) => Err(error),
+                Err(restore_error) => {
+                    unregister_all(registrations);
+                    registrations.clear();
+                    if let Some(state) = TAP_STATE.get() {
+                        let mut state = state.lock();
+                        state.actions.clear();
+                        state.pressed.clear();
+                        state.chorded.clear();
+                        state.last_release = None;
+                    }
+                    Err(format!(
+                        "{error} The previous shortcuts could not be restored, so global shortcuts were disabled: {restore_error}"
+                    ))
+                }
+            }
         }
     }
 }

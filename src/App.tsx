@@ -95,7 +95,7 @@ export default function App() {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const toastId = useRef(0);
   const cardRefs = useRef(new Map<string, CardItemHandle>());
-  const composerSubmitting = useRef(false);
+  const composerSubmission = useRef<Promise<void> | null>(null);
   const quitting = useRef(false);
   const completionQueue = useRef<Promise<void>>(Promise.resolve());
   const completionSequence = useRef(0);
@@ -324,7 +324,11 @@ export default function App() {
           await saveSettings(settings);
         });
       }
-      await Promise.all([editCommit, settingsSaveQueue.current]);
+      await Promise.all([
+        editCommit,
+        settingsSaveQueue.current,
+        composerSubmission.current ?? Promise.resolve(),
+      ]);
       await quitApp();
     } catch (error) {
       quitting.current = false;
@@ -332,12 +336,10 @@ export default function App() {
     }
   }
 
-  async function submitComposer() {
-    if (composerSubmitting.current) return;
+  async function submitComposerDraft() {
     const submittedDraft = composer;
     const value = submittedDraft.trim();
     if (!value) return;
-    composerSubmitting.current = true;
     try {
       if (SECTION_INPUT_PATTERN.test(value)) {
         const section = await createSection(value.replace(/^#\s+/, ""));
@@ -357,8 +359,17 @@ export default function App() {
       }
     } catch (error) {
       showError(error);
+    }
+  }
+
+  async function submitComposer() {
+    if (composerSubmission.current) return composerSubmission.current;
+    const operation = submitComposerDraft();
+    composerSubmission.current = operation;
+    try {
+      await operation;
     } finally {
-      composerSubmitting.current = false;
+      if (composerSubmission.current === operation) composerSubmission.current = null;
     }
   }
 
