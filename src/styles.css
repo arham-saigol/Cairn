@@ -1,0 +1,259 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  --panel-opacity: 94%;
+  --panel-base: #e9ebee;
+  --panel-solid: #eef0f2;
+  --popover: rgb(250 251 252 / 96%);
+  --toast: rgb(255 255 255 / 92%);
+  --input: rgb(255 255 255 / 76%);
+  --composer: rgb(255 255 255 / 82%);
+  --card: rgb(255 255 255 / 84%);
+  --card-selected: rgb(250 253 255 / 94%);
+  --card-complete: rgb(248 249 250 / 68%);
+  --text: #17191c;
+  --muted-text: #5f646b;
+  --subtle: #8c929a;
+  --muted: rgb(24 31 40 / 5.5%);
+  --muted-strong: rgb(24 31 40 / 11%);
+  --border: rgb(31 38 47 / 16%);
+  --border-soft: rgb(31 38 47 / 9%);
+  --check-border: rgb(31 38 47 / 43%);
+  --key: rgb(255 255 255 / 75%);
+  --danger: #c44747;
+  --danger-soft: rgb(196 71 71 / 10%);
+  --shadow-window: 0 22px 58px rgb(24 33 43 / 24%), 0 2px 10px rgb(24 33 43 / 10%);
+  --shadow-card: 0 1px 1px rgb(20 25 31 / 4%), 0 4px 14px rgb(20 25 31 / 3%);
+  --shadow-input: 0 1px 1px rgb(20 25 31 / 4%);
+  --shadow-composer: 0 -8px 32px rgb(28 34 42 / 6%), 0 1px 2px rgb(20 25 31 / 5%);
+  --shadow-popover: 0 14px 42px rgb(20 25 31 / 18%), 0 2px 8px rgb(20 25 31 / 8%);
+  --shadow-dialog: 0 24px 70px rgb(20 25 31 / 28%), 0 4px 12px rgb(20 25 31 / 10%);
+  --accent: #287bd9;
+  --accent-soft: rgb(40 123 217 / 10%);
+  --accent-ring: rgb(40 123 217 / 22%);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --panel-base: #24272b;
+  --panel-solid: #272a2f;
+  --popover: rgb(39 42 47 / 97%);
+  --toast: rgb(47 51 57 / 94%);
+  --input: rgb(255 255 255 / 7%);
+  --composer: rgb(255 255 255 / 7.5%);
+  --card: rgb(255 255 255 / 7.5%);
+  --card-selected: rgb(255 255 255 / 9.5%);
+  --card-complete: rgb(255 255 255 / 4%);
+  --text: #f0f2f5;
+  --muted-text: #b4b9c0;
+  --subtle: #818891;
+  --muted: rgb(255 255 255 / 6%);
+  --muted-strong: rgb(255 255 255 / 12%);
+  --border: rgb(255 255 255 / 15%);
+  --border-soft: rgb(255 255 255 / 8%);
+  --check-border: rgb(255 255 255 / 38%);
+  --key: rgb(255 255 255 / 7%);
+  --danger: #ee7373;
+  --danger-soft: rgb(238 115 115 / 11%);
+  --shadow-window: 0 24px 64px rgb(0 0 0 / 48%), 0 2px 12px rgb(0 0 0 / 24%);
+  --shadow-card: 0 1px 1px rgb(0 0 0 / 15%), 0 5px 18px rgb(0 0 0 / 8%);
+  --shadow-composer: 0 -10px 36px rgb(0 0 0 / 18%), 0 1px 3px rgb(0 0 0 / 20%);
+  --shadow-popover: 0 18px 48px rgb(0 0 0 / 46%), 0 2px 10px rgb(0 0 0 / 28%);
+  --shadow-dialog: 0 28px 80px rgb(0 0 0 / 58%), 0 4px 16px rgb(0 0 0 / 32%);
+}
+
+:root[data-accent="teal"] {
+  --accent: #148b88;
+  --accent-soft: rgb(20 139 136 / 11%);
+  --accent-ring: rgb(20 139 136 / 23%);
+}
+
+:root[data-accent="violet"] {
+  --accent: #7857c6;
+  --accent-soft: rgb(120 87 198 / 11%);
+  --accent-ring: rgb(120 87 198 / 23%);
+}
+
+:root[data-accent="amber"] {
+  --accent: #b66b16;
+  --accent-soft: rgb(182 107 22 / 11%);
+  --accent-ring: rgb(182 107 22 / 23%);
+}
+
+:root[data-accent="rose"] {
+  --accent: #bc5269;
+  --accent-soft: rgb(188 82 105 / 11%);
+  --accent-ring: rgb(188 82 105 / 23%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  user-select: none;
+}
+
+#root {
+  padding: 8px;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+.rail-shell {
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--panel-base) var(--panel-opacity), transparent);
+  box-shadow: var(--shadow-window);
+  backdrop-filter: blur(28px) saturate(1.15);
+  -webkit-backdrop-filter: blur(28px) saturate(1.15);
+}
+
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+}
+
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] input,
+[data-tauri-drag-region] [role="button"] {
+  -webkit-app-region: no-drag;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--subtle) 35%, transparent);
+  background-clip: padding-box;
+}
+
+.menu-content[data-state="open"] {
+  animation: menu-in 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+}
+
+.menu-content[data-state="closed"] {
+  animation: menu-out 100ms ease-in;
+}
+
+.dialog-overlay[data-state="open"] {
+  animation: fade-in 150ms ease-out;
+}
+
+.dialog-overlay[data-state="closed"] {
+  animation: fade-out 110ms ease-in;
+}
+
+.dialog-content[data-state="open"],
+.settings-panel[data-state="open"] {
+  animation: dialog-in 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dialog-content[data-state="closed"],
+.settings-panel[data-state="closed"] {
+  animation: dialog-out 120ms ease-in;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-3px);
+  }
+}
+
+@keyframes menu-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.975);
+  }
+}
+
+@keyframes dialog-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -49%) scale(0.985);
+  }
+}
+
+.settings-panel[data-state="open"] {
+  animation-name: panel-in;
+}
+
+.settings-panel[data-state="closed"] {
+  animation-name: panel-out;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+@keyframes panel-out {
+  to {
+    opacity: 0;
+    transform: translateY(5px) scale(0.99);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
