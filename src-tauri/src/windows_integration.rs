@@ -403,33 +403,57 @@ pub fn write_clipboard_text(text: &str) -> Result<(), String> {
     let mut wide: Vec<u16> = text.encode_utf16().collect();
     wide.push(0);
     unsafe {
+        OleInitialize(None).map_err(|error| error.to_string())?;
+        let original = match OleGetClipboard() {
+            Ok(data) => data,
+            Err(error) => {
+                OleUninitialize();
+                return Err(format!("The clipboard could not be preserved: {error}"));
+            }
+        };
         let bytes = wide.len() * size_of::<u16>();
-        let memory = GlobalAlloc(GMEM_MOVEABLE, bytes).map_err(|error| error.to_string())?;
+        let memory = match GlobalAlloc(GMEM_MOVEABLE, bytes) {
+            Ok(memory) => memory,
+            Err(error) => {
+                OleUninitialize();
+                return Err(error.to_string());
+            }
+        };
         let target = GlobalLock(memory) as *mut u16;
         if target.is_null() {
             let _ = GlobalFree(Some(memory));
+            OleUninitialize();
             return Err("Windows could not allocate clipboard memory.".into());
         }
         ptr::copy_nonoverlapping(wide.as_ptr(), target, wide.len());
         let _ = GlobalUnlock(memory);
         if let Err(error) = open_clipboard_retry() {
             let _ = GlobalFree(Some(memory));
+            OleUninitialize();
             return Err(error);
         }
-        let result = (|| {
-            if let Err(error) = EmptyClipboard() {
-                let _ = GlobalFree(Some(memory));
-                return Err(error.to_string());
-            }
-            let handle = HANDLE(memory.0);
-            if let Err(error) = SetClipboardData(CF_UNICODETEXT.0 as u32, Some(handle)) {
-                let _ = GlobalFree(Some(memory));
-                return Err(error.to_string());
-            }
-            Ok(())
-        })();
+        if let Err(error) = EmptyClipboard() {
+            let _ = GlobalFree(Some(memory));
+            let _ = CloseClipboard();
+            OleUninitialize();
+            return Err(error.to_string());
+        }
+        let handle = HANDLE(memory.0);
+        let published = SetClipboardData(CF_UNICODETEXT.0 as u32, Some(handle));
         let _ = CloseClipboard();
-        result
+        if let Err(error) = published {
+            let _ = GlobalFree(Some(memory));
+            let restored = if OleSetClipboard(&original).is_ok() {
+                OleFlushClipboard().map_err(|restore_error| restore_error.to_string())
+            } else {
+                Err("Windows could not restore the original clipboard contents.".to_string())
+            };
+            OleUninitialize();
+            restored?;
+            return Err(error.to_string());
+        }
+        OleUninitialize();
+        Ok(())
     }
 }
 

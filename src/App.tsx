@@ -103,6 +103,7 @@ export default function App() {
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
   const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const pendingAlwaysOnTop = useRef<{ value: boolean; sequence: number } | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -631,10 +632,15 @@ export default function App() {
         void copyCards(true, true);
         break;
       case "toggleAlwaysOnTop":
-        if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
-        settingsSaveSequence.current += 1;
+        if (settingsSaveTimer.current) {
+          clearTimeout(settingsSaveTimer.current);
+          settingsSaveTimer.current = null;
+        }
         {
-          const next = { ...settings, alwaysOnTop: !settings.alwaysOnTop };
+          const sequence = ++settingsSaveSequence.current;
+          const alwaysOnTop = !(pendingAlwaysOnTop.current?.value ?? settings.alwaysOnTop);
+          pendingAlwaysOnTop.current = { value: alwaysOnTop, sequence };
+          const next = { ...settings, alwaysOnTop };
           settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
             try {
               const saved = await saveSettings(next);
@@ -647,6 +653,10 @@ export default function App() {
                 setSettings(snapshot.settings);
               } catch {
                 // Keep the latest in-memory settings if the database cannot be reloaded.
+              }
+            } finally {
+              if (pendingAlwaysOnTop.current?.sequence === sequence) {
+                pendingAlwaysOnTop.current = null;
               }
             }
           });
