@@ -105,6 +105,8 @@ function ShortcutRecorder({
   const [pressed, setPressed] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const lastModifier = useRef<{ key: string; at: number } | null>(null);
+  const heldModifiers = useRef(new Set<string>());
+  const chordedModifiers = useRef(new Set<string>());
   const recorderRef = useRef<HTMLDivElement>(null);
 
   const currentValue = target
@@ -140,6 +142,12 @@ function ShortcutRecorder({
             event.stopPropagation();
             if (event.key === "Escape") return onClose();
             const key = normalizeKeyName(event.key);
+            if (["Ctrl", "Alt", "Shift", "Win"].includes(key)) {
+              heldModifiers.current.add(key);
+            } else {
+              heldModifiers.current.forEach((modifier) => chordedModifiers.current.add(modifier));
+              lastModifier.current = null;
+            }
             setPressed((current) => Array.from(new Set([...current, key])));
             const value = shortcutFromKeyboardEvent(event.nativeEvent);
             if (value) propose(value);
@@ -151,6 +159,11 @@ function ShortcutRecorder({
             const key = normalizeKeyName(event.key);
             setPressed((current) => current.filter((item) => item !== key));
             if (!["Ctrl", "Alt", "Shift", "Win"].includes(key)) return;
+            heldModifiers.current.delete(key);
+            if (chordedModifiers.current.delete(key)) {
+              lastModifier.current = null;
+              return;
+            }
             const previous = lastModifier.current;
             const at = performance.now();
             if (previous?.key === key && at - previous.at <= 440) {

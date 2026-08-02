@@ -314,12 +314,16 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
             Err("The selected app did not respond to the clipboard capture fallback.".into())
         };
 
-        if OleSetClipboard(&original).is_ok() {
-            let _ = OleFlushClipboard();
-        } else if let Some(text) = original_text.as_deref() {
-            let _ = write_clipboard_text(text);
-        }
+        let restored = if OleSetClipboard(&original).is_ok() {
+            OleFlushClipboard().map_err(|error| error.to_string())
+        } else {
+            if let Some(text) = original_text.as_deref() {
+                let _ = write_clipboard_text(text);
+            }
+            Err("Windows could not restore the original clipboard contents.".to_string())
+        };
         OleUninitialize();
+        restored?;
         captured
     }
 }
@@ -344,18 +348,24 @@ pub fn write_clipboard_text(text: &str) -> Result<(), String> {
     let mut wide: Vec<u16> = text.encode_utf16().collect();
     wide.push(0);
     unsafe {
-        open_clipboard_retry()?;
+        let bytes = wide.len() * size_of::<u16>();
+        let memory = GlobalAlloc(GMEM_MOVEABLE, bytes).map_err(|error| error.to_string())?;
+        let target = GlobalLock(memory) as *mut u16;
+        if target.is_null() {
+            let _ = GlobalFree(Some(memory));
+            return Err("Windows could not allocate clipboard memory.".into());
+        }
+        ptr::copy_nonoverlapping(wide.as_ptr(), target, wide.len());
+        let _ = GlobalUnlock(memory);
+        if let Err(error) = open_clipboard_retry() {
+            let _ = GlobalFree(Some(memory));
+            return Err(error);
+        }
         let result = (|| {
-            EmptyClipboard().map_err(|error| error.to_string())?;
-            let bytes = wide.len() * size_of::<u16>();
-            let memory = GlobalAlloc(GMEM_MOVEABLE, bytes).map_err(|error| error.to_string())?;
-            let target = GlobalLock(memory) as *mut u16;
-            if target.is_null() {
+            if let Err(error) = EmptyClipboard() {
                 let _ = GlobalFree(Some(memory));
-                return Err("Windows could not allocate clipboard memory.".into());
+                return Err(error.to_string());
             }
-            ptr::copy_nonoverlapping(wide.as_ptr(), target, wide.len());
-            let _ = GlobalUnlock(memory);
             let handle = HANDLE(memory.0);
             if let Err(error) = SetClipboardData(CF_UNICODETEXT.0 as u32, Some(handle)) {
                 let _ = GlobalFree(Some(memory));
