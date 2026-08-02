@@ -701,7 +701,7 @@ export default function App() {
           settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
             try {
               const saved = await saveSettings(next);
-              setSettings(saved);
+              if (sequence === settingsSaveSequence.current) setSettings(saved);
               notify(saved.alwaysOnTop ? "Cairn is always on top" : "Always on top is off");
             } catch (error) {
               showError(error);
@@ -866,7 +866,9 @@ export default function App() {
                                 onFocus={() => setFocused(card.id)}
                                 onToggleCompleted={() => void toggleComplete(ids)}
                                 onBeginEdit={() => setEditing(card.id)}
-                                onEndEdit={() => setEditing(null)}
+                                onEndEdit={() =>
+                                  setEditing((current) => (current === card.id ? null : current))
+                                }
                                 onSave={async (content) => {
                                   const updated = await updateCardContent(card.id, content);
                                   setCards((current) =>
