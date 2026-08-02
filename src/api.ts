@@ -177,6 +177,11 @@ export async function bootstrap(): Promise<Snapshot> {
   return structuredClone(mockState);
 }
 
+export async function takeStartupWarning(): Promise<string | null> {
+  if (isTauri) return command<string | null>("take_startup_warning");
+  return null;
+}
+
 export async function createNote(content: string, sectionId: string | null): Promise<Card> {
   if (isTauri) return command<Card>("create_note", { content, sectionId });
   const stamp = new Date().toISOString();

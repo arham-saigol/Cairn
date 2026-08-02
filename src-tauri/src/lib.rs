@@ -16,11 +16,17 @@ struct AppState {
     database: Database,
     previous_window: PreviousWindow,
     shortcuts: ShortcutService,
+    startup_warning: parking_lot::Mutex<Option<String>>,
 }
 
 #[tauri::command]
 fn bootstrap(state: State<'_, AppState>) -> Result<Snapshot, String> {
     state.database.bootstrap()
+}
+
+#[tauri::command]
+fn take_startup_warning(state: State<'_, AppState>) -> Option<String> {
+    state.startup_warning.lock().take()
 }
 
 #[tauri::command]
@@ -231,17 +237,22 @@ pub fn run() {
                 window.show()?;
                 window.set_focus()?;
             }
-            let shortcuts = ShortcutService::start(app.handle().clone(), &snapshot.settings)
-                .map_err(std::io::Error::other)?;
+            let (shortcuts, startup_warning) =
+                ShortcutService::start(app.handle().clone(), &snapshot.settings)
+                    .map_err(std::io::Error::other)?;
             app.manage(AppState {
                 database,
                 previous_window,
                 shortcuts,
+                startup_warning: parking_lot::Mutex::new(startup_warning.map(|error| {
+                    format!("Global shortcuts are disabled until they are reconfigured: {error}")
+                })),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap,
+            take_startup_warning,
             create_note,
             create_section,
             update_card_content,

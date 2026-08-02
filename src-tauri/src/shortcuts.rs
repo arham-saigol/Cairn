@@ -44,7 +44,7 @@ pub struct ShortcutService {
 }
 
 impl ShortcutService {
-    pub fn start(app: AppHandle, settings: &AppSettings) -> Result<Self, String> {
+    pub fn start(app: AppHandle, settings: &AppSettings) -> Result<(Self, Option<String>), String> {
         let (sender, receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         thread::Builder::new()
@@ -55,10 +55,8 @@ impl ShortcutService {
             .recv_timeout(Duration::from_secs(2))
             .map_err(|_| "The global shortcut service did not start in time.".to_string())?;
         let service = Self { sender, thread_id };
-        if let Err(error) = service.configure(&settings.global_shortcuts) {
-            eprintln!("Global shortcuts are disabled until they are reconfigured: {error}");
-        }
-        Ok(service)
+        let startup_error = service.configure(&settings.global_shortcuts).err();
+        Ok((service, startup_error))
     }
 
     pub fn configure(&self, shortcuts: &BTreeMap<String, Option<String>>) -> Result<(), String> {

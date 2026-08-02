@@ -46,6 +46,7 @@ import {
   saveSettings,
   setCardsCompleted,
   showRail,
+  takeStartupWarning,
   toggleRail,
   updateCardContent,
 } from "./api";
@@ -106,10 +107,13 @@ export default function App() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const snapshot = await bootstrap();
+      const [snapshot, startupWarning] = await Promise.all([bootstrap(), takeStartupWarning()]);
       setCards(snapshot.cards.sort((a, b) => a.sortOrder - b.sortOrder));
       setSections(snapshot.sections.sort((a, b) => a.sortOrder - b.sortOrder));
       setSettings(snapshot.settings);
+      if (startupWarning) {
+        setToast({ id: ++toastId.current, message: startupWarning, kind: "info" });
+      }
       setFatalError(null);
     } catch (error) {
       setFatalError(error instanceof Error ? error.message : String(error));
