@@ -147,11 +147,12 @@ const RESERVED = new Map([
   ["Win+Tab", "Windows reserves this for Task View."],
 ]);
 
-const FIXED_VALUES = new Set(
-  FIXED_SHORTCUTS.map(([shortcut]) => normalizeShortcut(shortcut)).filter(
+const FIXED_VALUES = new Set([
+  ...FIXED_SHORTCUTS.map(([shortcut]) => normalizeShortcut(shortcut)).filter(
     (shortcut) => !shortcut.includes("keys") && !shortcut.includes("Arrow"),
   ),
-);
+  ...["Up", "Down", "Left", "Right", "Shift+Up", "Shift+Down", "Shift+Left", "Shift+Right"],
+]);
 const GLOBAL_NAMED_KEYS = new Set([
   "Space",
   "Enter",

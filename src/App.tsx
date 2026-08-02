@@ -39,16 +39,19 @@ import {
   onFocusNewCard,
   onGlobalShortcut,
   quitApp,
+  readStorageValue,
   rememberPreviousWindow,
   reorderCards,
   restoreBackup,
   restorePreviousWindow,
+  removeStorageValue,
   saveSettings,
   setCardsCompleted,
   showRail,
   takeStartupWarning,
   toggleRail,
   updateCardContent,
+  writeStorageValue,
 } from "./api";
 import { CardItem, type CardItemHandle } from "./components/CardItem";
 import { Composer, SECTION_INPUT_PATTERN } from "./components/Composer";
@@ -91,7 +94,7 @@ export default function App() {
   const [clearOpen, setClearOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [lastBackupId, setLastBackupId] = useState<string | null>(() =>
-    localStorage.getItem("cairn:last-clear-backup"),
+    readStorageValue("cairn:last-clear-backup"),
   );
   const [toast, setToast] = useState<ToastState | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -546,7 +549,7 @@ export default function App() {
       setSelected(new Set());
       setSectionId(null);
       setClearOpen(false);
-      localStorage.setItem("cairn:last-clear-backup", backupId);
+      writeStorageValue("cairn:last-clear-backup", backupId);
       setLastBackupId(backupId);
       notify("Cairn content cleared", {
         actionLabel: "Restore",
@@ -563,7 +566,7 @@ export default function App() {
     setSections(snapshot.sections.sort((a, b) => a.sortOrder - b.sortOrder));
     setLastBackupId((current) => {
       if (current !== backupId) return current;
-      localStorage.removeItem("cairn:last-clear-backup");
+      removeStorageValue("cairn:last-clear-backup");
       return null;
     });
     notify("Last clear restored", { kind: "success" });

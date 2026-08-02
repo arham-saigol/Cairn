@@ -19,6 +19,30 @@ export const isTauri = Boolean(window.__TAURI_INTERNALS__);
 const STORAGE_KEY = "cairn-browser-preview-v1";
 const BACKUP_KEY = "cairn-browser-preview-backup-v1";
 
+export function readStorageValue(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function writeStorageValue(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage is optional in locked-down browser previews.
+  }
+}
+
+export function removeStorageValue(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Storage is optional in locked-down browser previews.
+  }
+}
+
 const now = new Date().toISOString();
 const demoSnapshot: Snapshot = {
   sections: [
