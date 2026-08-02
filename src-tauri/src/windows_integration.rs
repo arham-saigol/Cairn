@@ -217,7 +217,7 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
     if SELECTION_CAPTURE_ACTIVE.swap(true, Ordering::AcqRel) {
         return Err("A selection capture is already in progress.".into());
     }
-    let _capture_guard = SelectionCaptureGuard;
+    let capture_guard = SelectionCaptureGuard;
     let context = foreground_context();
     if context.hwnd.0.is_null() {
         return Err("No foreground application is available.".into());
@@ -228,7 +228,7 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
             // Fall back to a synthetic copy when UI Automation has no usable selection.
         }
     }
-    let text = selected_text_clipboard_fallback(context.hwnd)?;
+    let text = selected_text_clipboard_fallback(context.hwnd, capture_guard)?;
     if text.trim().is_empty() {
         return Err("No selected text was found. Select text in another app and try again.".into());
     }
@@ -300,7 +300,10 @@ fn selected_text_uia_sta(expected_foreground: HWND) -> Result<String, String> {
     }
 }
 
-fn selected_text_clipboard_fallback(foreground: HWND) -> Result<String, String> {
+fn selected_text_clipboard_fallback(
+    foreground: HWND,
+    capture_guard: SelectionCaptureGuard,
+) -> Result<String, String> {
     if CLIPBOARD_CAPTURE_ACTIVE.swap(true, Ordering::AcqRel) {
         return Err("A clipboard capture is already in progress.".into());
     }
@@ -309,6 +312,7 @@ fn selected_text_clipboard_fallback(foreground: HWND) -> Result<String, String> 
     if let Err(error) = thread::Builder::new()
         .name("cairn-clipboard-capture".into())
         .spawn(move || {
+            let _capture_guard = capture_guard;
             let _guard = ClipboardCaptureGuard;
             let _ = sender.send(clipboard_fallback_sta(HWND(
                 foreground as *mut std::ffi::c_void,
