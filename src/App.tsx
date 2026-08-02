@@ -284,6 +284,9 @@ export default function App() {
   );
 
   function applySettings(next: AppSettings) {
+    if (pendingAlwaysOnTop.current) {
+      next = { ...next, alwaysOnTop: pendingAlwaysOnTop.current.value };
+    }
     setSettings(next);
     if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
     const sequence = ++settingsSaveSequence.current;
@@ -641,6 +644,7 @@ export default function App() {
           const alwaysOnTop = !(pendingAlwaysOnTop.current?.value ?? settings.alwaysOnTop);
           pendingAlwaysOnTop.current = { value: alwaysOnTop, sequence };
           const next = { ...settings, alwaysOnTop };
+          setSettings(next);
           settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
             try {
               const saved = await saveSettings(next);

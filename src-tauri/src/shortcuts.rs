@@ -22,8 +22,8 @@ use windows::Win32::{
             CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW,
             SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT,
             MSG, PM_NOREMOVE, PM_REMOVE, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_HOTKEY,
-            WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN,
-            WM_SYSKEYUP, WM_XBUTTONDOWN,
+            WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MOUSEHWHEEL, WM_MOUSEWHEEL,
+            WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
         },
     },
 };
@@ -156,6 +156,8 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             WM_RBUTTONDOWN,
             WM_MBUTTONDOWN,
             WM_XBUTTONDOWN,
+            WM_MOUSEWHEEL,
+            WM_MOUSEHWHEEL,
         ]
         .contains(&(wparam.0 as u32))
     {
