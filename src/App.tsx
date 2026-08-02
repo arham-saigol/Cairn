@@ -674,7 +674,7 @@ export default function App() {
         void toggleRail();
         break;
       case "captureSelection":
-        void captureSelection()
+        void trackMutation(captureSelection())
           .then((card) => {
             setCards((current) => [...current, card]);
             setSelected(new Set([card.id]));
