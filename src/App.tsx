@@ -326,7 +326,7 @@ export default function App() {
           showError(error);
           try {
             const snapshot = await bootstrap();
-            setSettings(snapshot.settings);
+            if (sequence === settingsSaveSequence.current) setSettings(snapshot.settings);
           } catch {
             // Preserve the in-memory view if even reloading local settings fails.
           }
@@ -883,7 +883,9 @@ export default function App() {
                                   setEditing((current) => (current === card.id ? null : current))
                                 }
                                 onSave={async (content) => {
-                                  const updated = await updateCardContent(card.id, content);
+                                  const updated = await trackMutation(
+                                    updateCardContent(card.id, content),
+                                  );
                                   setCards((current) =>
                                     current.map((item) => (item.id === card.id ? updated : item)),
                                   );
