@@ -392,8 +392,9 @@ export default function App() {
       ...card,
       sortOrder,
     }));
-    setCards(next);
-    void reorderCards(next.map((card) => card.id)).catch(showError);
+    void reorderCards(next.map((card) => card.id))
+      .then(() => setCards(next))
+      .catch(showError);
   }
 
   async function confirmDelete() {

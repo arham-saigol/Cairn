@@ -330,7 +330,34 @@ export async function clearAll(): Promise<string> {
 export async function restoreBackup(id: string): Promise<Snapshot> {
   if (isTauri) return command<Snapshot>("restore_backup", { id });
   if (!lastBackup) throw new Error("The local backup is no longer available.");
-  mockState = structuredClone(lastBackup);
+  const current = structuredClone(mockState);
+  const sectionIds = new Map<string, string>();
+  const sections = current.sections;
+  let nextSectionOrder = Math.max(-1, ...sections.map((section) => section.sortOrder)) + 1;
+  for (const backedUpSection of lastBackup.sections) {
+    const existing = sections.find(
+      (section) => section.name.toLowerCase() === backedUpSection.name.toLowerCase(),
+    );
+    if (existing) {
+      sectionIds.set(backedUpSection.id, existing.id);
+    } else {
+      sections.push({ ...backedUpSection, sortOrder: nextSectionOrder++ });
+      sectionIds.set(backedUpSection.id, backedUpSection.id);
+    }
+  }
+
+  const cards = current.cards;
+  const existingCardIds = new Set(cards.map((card) => card.id));
+  let nextCardOrder = Math.max(-1, ...cards.map((card) => card.sortOrder)) + 1;
+  for (const backedUpCard of lastBackup.cards) {
+    if (existingCardIds.has(backedUpCard.id)) continue;
+    cards.push({
+      ...backedUpCard,
+      sectionId: backedUpCard.sectionId ? (sectionIds.get(backedUpCard.sectionId) ?? null) : null,
+      sortOrder: nextCardOrder++,
+    });
+  }
+  mockState = { cards, sections, settings: current.settings };
   persistMock();
   return structuredClone(mockState);
 }
