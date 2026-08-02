@@ -95,6 +95,16 @@ struct TapState {
 
 static TAP_STATE: OnceLock<Mutex<TapState>> = OnceLock::new();
 
+fn reset_tap_state() {
+    if let Some(state) = TAP_STATE.get() {
+        let mut state = state.lock();
+        state.actions.clear();
+        state.pressed.clear();
+        state.chorded.clear();
+        state.last_release = None;
+    }
+}
+
 unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         let event = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
@@ -286,38 +296,20 @@ fn configure_shortcuts(
 ) -> Result<(), String> {
     unregister_all(registrations);
     registrations.clear();
-    if let Some(state) = TAP_STATE.get() {
-        let mut state = state.lock();
-        state.actions.clear();
-        state.pressed.clear();
-        state.chorded.clear();
-        state.last_release = None;
-    }
+    reset_tap_state();
 
     match register_map(next, registrations, hook_available) {
         Ok(()) => Ok(()),
         Err(error) => {
             unregister_all(registrations);
             registrations.clear();
-            if let Some(state) = TAP_STATE.get() {
-                let mut state = state.lock();
-                state.actions.clear();
-                state.pressed.clear();
-                state.chorded.clear();
-                state.last_release = None;
-            }
+            reset_tap_state();
             match register_map(previous, registrations, hook_available) {
                 Ok(()) => Err(error),
                 Err(restore_error) => {
                     unregister_all(registrations);
                     registrations.clear();
-                    if let Some(state) = TAP_STATE.get() {
-                        let mut state = state.lock();
-                        state.actions.clear();
-                        state.pressed.clear();
-                        state.chorded.clear();
-                        state.last_release = None;
-                    }
+                    reset_tap_state();
                     Err(format!(
                         "{error} The previous shortcuts could not be restored, so global shortcuts were disabled: {restore_error}"
                     ))

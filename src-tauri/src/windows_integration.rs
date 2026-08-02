@@ -56,6 +56,7 @@ const RAIL_OFFSET: i32 = 12;
 const MIN_RAIL_WIDTH: i32 = 340;
 const MIN_RAIL_HEIGHT: i32 = 480;
 const UIA_TIMEOUT: Duration = Duration::from_millis(1500);
+const CLIPBOARD_CAPTURE_TIMEOUT: Duration = Duration::from_millis(2500);
 static UIA_WORKER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CLIPBOARD_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SELECTION_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -223,7 +224,6 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
     }
     match selected_text_uia(context.hwnd) {
         Ok(text) if !text.trim().is_empty() => return Ok((text, context)),
-        Err(error) if error == UIA_BUSY_ERROR => return Err(error),
         _ => {
             // Fall back to a synthetic copy when UI Automation has no usable selection.
         }
@@ -305,22 +305,28 @@ fn selected_text_clipboard_fallback(foreground: HWND) -> Result<String, String> 
         return Err("A clipboard capture is already in progress.".into());
     }
     let foreground = foreground.0 as usize;
-    let worker = thread::Builder::new()
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    if let Err(error) = thread::Builder::new()
         .name("cairn-clipboard-capture".into())
         .spawn(move || {
             let _guard = ClipboardCaptureGuard;
-            clipboard_fallback_sta(HWND(foreground as *mut std::ffi::c_void))
-        });
-    let worker = match worker {
-        Ok(worker) => worker,
-        Err(error) => {
-            CLIPBOARD_CAPTURE_ACTIVE.store(false, Ordering::Release);
-            return Err(error.to_string());
+            let _ = sender.send(clipboard_fallback_sta(HWND(
+                foreground as *mut std::ffi::c_void,
+            )));
+        })
+    {
+        CLIPBOARD_CAPTURE_ACTIVE.store(false, Ordering::Release);
+        return Err(error.to_string());
+    }
+    match receiver.recv_timeout(CLIPBOARD_CAPTURE_TIMEOUT) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err("The clipboard capture did not respond in time.".into())
         }
-    };
-    worker
-        .join()
-        .map_err(|_| "The clipboard capture worker stopped unexpectedly.".to_string())?
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err("The clipboard capture worker stopped unexpectedly.".into())
+        }
+    }
 }
 
 fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
@@ -414,7 +420,7 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
             Err("The selected app did not respond to the clipboard capture fallback.".into())
         };
 
-        let restored = restore_clipboard();
+        let restored = if changed { restore_clipboard() } else { Ok(()) };
         drop(original);
         OleUninitialize();
         restored?;

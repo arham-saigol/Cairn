@@ -15,6 +15,15 @@ export function isEditableTarget(target: EventTarget | null) {
   );
 }
 
+export function isActivationTarget(target: EventTarget | null) {
+  return (
+    target instanceof Element &&
+    target.closest(
+      "button, a[href], summary, [role='button'], [role='checkbox'], [role='menuitem'], [role='radio'], [role='switch'], [role='tab']",
+    ) !== null
+  );
+}
+
 export function formatCapturedAt(value: string) {
   const date = new Date(value);
   const today = new Date();

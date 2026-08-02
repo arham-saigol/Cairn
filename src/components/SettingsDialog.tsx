@@ -178,12 +178,18 @@ function ShortcutRecorder({
             }
             const previous = lastModifier.current;
             const at = performance.now();
-            if (previous?.key === key && at - previous.at <= 440) {
+            if (previous?.key === key && at - previous.at <= 420) {
               propose(`DoubleTap:${key}`);
               lastModifier.current = null;
             } else {
               lastModifier.current = { key, at };
             }
+          }}
+          onBlur={() => {
+            heldModifiers.current.clear();
+            chordedModifiers.current.clear();
+            lastModifier.current = null;
+            setPressed([]);
           }}
           tabIndex={-1}
         >
@@ -280,7 +286,10 @@ export function SettingsDialog({
 }) {
   const [tab, setTab] = useState(initialTab);
   const [recorder, setRecorder] = useState<RecorderTarget | null>(null);
-  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<{
+    scope: "global" | "app";
+    message: string;
+  } | null>(null);
 
   const recorderDefault = useMemo(() => {
     if (!recorder) return null;
@@ -306,7 +315,7 @@ export function SettingsDialog({
       if (!value) continue;
       const error = validateShortcut(value, scope, id, next);
       if (error) {
-        setResetError(`Defaults could not be restored: ${error}`);
+        setResetError({ scope, message: `Defaults could not be restored: ${error}` });
         return;
       }
     }
@@ -530,6 +539,11 @@ export function SettingsDialog({
                 >
                   <RotateCcw className="mr-2 size-3.5" /> Restore global defaults
                 </Button>
+                {resetError?.scope === "global" ? (
+                  <p className="mb-4 px-2 text-[11px] leading-4 text-[var(--danger)]" role="alert">
+                    {resetError.message}
+                  </p>
+                ) : null}
 
                 <div className="px-1">
                   <SettingHeader
@@ -557,9 +571,9 @@ export function SettingsDialog({
                 >
                   <RotateCcw className="mr-2 size-3.5" /> Restore Cairn defaults
                 </Button>
-                {resetError ? (
+                {resetError?.scope === "app" ? (
                   <p className="mb-4 px-2 text-[11px] leading-4 text-[var(--danger)]" role="alert">
-                    {resetError}
+                    {resetError.message}
                   </p>
                 ) : null}
 

@@ -219,11 +219,20 @@ fn quit_app(app: tauri::AppHandle) {
 #[tauri::command]
 fn toggle_always_on_top(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
     let mut settings = state.database.load_settings()?;
+    let previous_always_on_top = settings.always_on_top;
     settings.always_on_top = !settings.always_on_top;
-    main_window(&app)?
+    let window = main_window(&app)?;
+    window
         .set_always_on_top(settings.always_on_top)
         .map_err(|error| error.to_string())?;
-    state.database.save_settings(&settings)?;
+    if let Err(error) = state.database.save_settings(&settings) {
+        if let Err(rollback_error) = window.set_always_on_top(previous_always_on_top) {
+            return Err(format!(
+                "{error} The previous always-on-top state could not be restored: {rollback_error}"
+            ));
+        }
+        return Err(error);
+    }
     Ok(settings.always_on_top)
 }
 
@@ -247,7 +256,7 @@ pub fn run() {
             let snapshot = database.bootstrap().map_err(std::io::Error::other)?;
             let previous_window = PreviousWindow::default();
             if let Some(window) = app.get_webview_window("main") {
-                let anchor = previous_window.remember(None);
+                let anchor = previous_window.remember(window_hwnd(&window).ok());
                 let _ = position_rail(&window, anchor);
                 window.set_always_on_top(snapshot.settings.always_on_top)?;
                 window.show()?;

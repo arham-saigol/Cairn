@@ -60,7 +60,7 @@ import { RailHeader } from "./components/RailHeader";
 import { SectionPickerDialog } from "./components/SectionPickerDialog";
 import { ToastRegion, type ToastState } from "./components/ToastRegion";
 import { shortcutMatches } from "./lib/keybindings";
-import { copyBlock, isEditableTarget } from "./lib/utils";
+import { copyBlock, isActivationTarget, isEditableTarget } from "./lib/utils";
 import {
   DEFAULT_SETTINGS,
   type AppSettings,
@@ -111,6 +111,7 @@ export default function App() {
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
   const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const pendingSettings = useRef<AppSettings | null>(null);
   const pendingAlwaysOnTop = useRef<{ value: boolean; sequence: number } | null>(null);
 
   const sensors = useSensors(
@@ -249,8 +250,20 @@ export default function App() {
 
   const queueCompletionUpdate = useCallback(
     (ids: string[], completed: boolean) => {
+      const sequence = ++completionSequence.current;
+      ids.forEach((id) => pendingCompletion.current.set(id, { completed, sequence }));
       const operation = trackMutation(
-        completionQueue.current.then(() => setCardsCompleted(ids, completed)),
+        completionQueue.current.then(async () => {
+          try {
+            return await setCardsCompleted(ids, completed);
+          } finally {
+            ids.forEach((id) => {
+              if (pendingCompletion.current.get(id)?.sequence === sequence) {
+                pendingCompletion.current.delete(id);
+              }
+            });
+          }
+        }),
       );
       completionQueue.current = operation.then(
         () => undefined,
@@ -320,10 +333,12 @@ export default function App() {
       next = { ...next, alwaysOnTop: pendingAlwaysOnTop.current.value };
     }
     setSettings(next);
+    pendingSettings.current = next;
     if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
     const sequence = ++settingsSaveSequence.current;
     settingsSaveTimer.current = setTimeout(() => {
       settingsSaveTimer.current = null;
+      pendingSettings.current = null;
       settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
         try {
           await saveSettings(next);
@@ -353,8 +368,10 @@ export default function App() {
         clearTimeout(settingsSaveTimer.current);
         settingsSaveTimer.current = null;
         settingsSaveSequence.current += 1;
+        const next = pendingSettings.current ?? settings;
+        pendingSettings.current = null;
         settingsFlush = settingsSaveQueue.current.then(async () => {
-          await saveSettings(settings);
+          await saveSettings(next);
         });
         settingsSaveQueue.current = settingsFlush.catch(() => undefined);
       }
@@ -564,11 +581,10 @@ export default function App() {
     const snapshot = await trackMutation(restoreBackup(backupId));
     setCards(snapshot.cards.sort((a, b) => a.sortOrder - b.sortOrder));
     setSections(snapshot.sections.sort((a, b) => a.sortOrder - b.sortOrder));
-    setLastBackupId((current) => {
-      if (current !== backupId) return current;
+    if (readStorageValue("cairn:last-clear-backup") === backupId) {
       removeStorageValue("cairn:last-clear-backup");
-      return null;
-    });
+    }
+    setLastBackupId((current) => (current === backupId ? null : current));
     notify("Last clear restored", { kind: "success" });
   }
 
@@ -605,6 +621,8 @@ export default function App() {
       }
       return;
     }
+
+    if ((event.key === "Enter" || event.key === " ") && isActivationTarget(event.target)) return;
 
     if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "c") {
       event.preventDefault();
@@ -686,8 +704,9 @@ export default function App() {
   });
 
   useEffect(() => {
-    window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
+    const onKeydown = (event: KeyboardEvent) => handleKeydown(event);
+    window.addEventListener("keydown", onKeydown);
+    return () => window.removeEventListener("keydown", onKeydown);
   }, []);
 
   const handleGlobalAction = useEffectEvent((event: GlobalShortcutEvent) => {
@@ -723,9 +742,11 @@ export default function App() {
         }
         {
           const sequence = ++settingsSaveSequence.current;
-          const alwaysOnTop = !(pendingAlwaysOnTop.current?.value ?? settings.alwaysOnTop);
+          const pending = pendingSettings.current ?? settings;
+          pendingSettings.current = null;
+          const alwaysOnTop = !(pendingAlwaysOnTop.current?.value ?? pending.alwaysOnTop);
           pendingAlwaysOnTop.current = { value: alwaysOnTop, sequence };
-          const next = { ...settings, alwaysOnTop };
+          const next = { ...pending, alwaysOnTop };
           setSettings(next);
           settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
             try {
@@ -758,7 +779,8 @@ export default function App() {
     let disposed = false;
     let unlistenShortcut: () => void = () => {};
     let unlistenFocus: () => void = () => {};
-    void onGlobalShortcut(handleGlobalAction).then((dispose) => {
+    const onShortcut = (event: GlobalShortcutEvent) => handleGlobalAction(event);
+    void onGlobalShortcut(onShortcut).then((dispose) => {
       if (disposed) dispose();
       else unlistenShortcut = dispose;
     });
