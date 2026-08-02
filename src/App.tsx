@@ -98,6 +98,7 @@ export default function App() {
   const composerSubmitting = useRef(false);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
+  const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -282,14 +283,18 @@ export default function App() {
     if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
     const sequence = ++settingsSaveSequence.current;
     settingsSaveTimer.current = setTimeout(() => {
-      void saveSettings(next).catch(async (error) => {
-        if (sequence !== settingsSaveSequence.current) return;
-        showError(error);
+      settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
         try {
-          const snapshot = await bootstrap();
-          setSettings(snapshot.settings);
-        } catch {
-          // Preserve the in-memory view if even reloading local settings fails.
+          await saveSettings(next);
+        } catch (error) {
+          if (sequence !== settingsSaveSequence.current) return;
+          showError(error);
+          try {
+            const snapshot = await bootstrap();
+            setSettings(snapshot.settings);
+          } catch {
+            // Preserve the in-memory view if even reloading local settings fails.
+          }
         }
       });
     }, 100);
@@ -580,12 +585,12 @@ export default function App() {
         settingsSaveSequence.current += 1;
         {
           const next = { ...settings, alwaysOnTop: !settings.alwaysOnTop };
-          void saveSettings(next)
-            .then((saved) => {
+          settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
+            try {
+              const saved = await saveSettings(next);
               setSettings(saved);
               notify(saved.alwaysOnTop ? "Cairn is always on top" : "Always on top is off");
-            })
-            .catch(async (error) => {
+            } catch (error) {
               showError(error);
               try {
                 const snapshot = await bootstrap();
@@ -593,7 +598,8 @@ export default function App() {
               } catch {
                 // Keep the latest in-memory settings if the database cannot be reloaded.
               }
-            });
+            }
+          });
         }
         break;
       case "clearAll":

@@ -486,6 +486,13 @@ fn send_ctrl_c() -> Result<(), String> {
     ];
     let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
     if sent != inputs.len() as u32 {
+        let cleanup = [
+            keyboard(VK_C, KEYEVENTF_KEYUP),
+            keyboard(VK_CONTROL, KEYEVENTF_KEYUP),
+        ];
+        unsafe {
+            let _ = SendInput(&cleanup, size_of::<INPUT>() as i32);
+        }
         return Err("Windows could not send the clipboard fallback shortcut.".into());
     }
     Ok(())
