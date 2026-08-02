@@ -77,6 +77,12 @@ export const FIXED_SHORTCUTS = [
 ] as const;
 
 const MODIFIER_ORDER = ["Ctrl", "Alt", "Shift", "Win"];
+export const UNSAFE_GLOBAL_SHORTCUT_MESSAGE =
+  "Global shortcuts need a modifier so normal typing stays safe.";
+export const WINDOWS_RESERVED_SHORTCUT_MESSAGE =
+  "Windows reserves this for closing the active window.";
+export const DUPLICATE_SHORTCUT_MESSAGE =
+  "That shortcut is already assigned to another Cairn command.";
 const MODIFIER_KEYS = new Map([
   ["Control", "Ctrl"],
   ["Ctrl", "Ctrl"],
@@ -100,6 +106,7 @@ const KEY_NAMES: Record<string, string> = {
 };
 
 export function normalizeKeyName(key: string) {
+  if (!key) return "";
   if (MODIFIER_KEYS.has(key)) return MODIFIER_KEYS.get(key)!;
   if (KEY_NAMES[key]) return KEY_NAMES[key];
   if (key.length === 1) return key.toUpperCase();
@@ -129,7 +136,7 @@ export function shortcutFromKeyboardEvent(event: KeyboardEvent) {
 }
 
 const RESERVED = new Map([
-  ["Alt+F4", "Windows reserves this for closing the active window."],
+  ["Alt+F4", WINDOWS_RESERVED_SHORTCUT_MESSAGE],
   ["Alt+Tab", "Windows reserves this for switching applications."],
   ["Ctrl+Alt+Delete", "Windows reserves this security shortcut."],
   ["Ctrl+Shift+Escape", "Windows reserves this for Task Manager."],
@@ -168,9 +175,9 @@ export function validateShortcut(
     const key = parts.find((part) => !MODIFIER_ORDER.includes(part));
     if (!key) return "Add a non-modifier key, or double-tap a modifier.";
     if (scope === "global" && modifiers.length === 0 && !/^F([1-9]|1\d|2[0-4])$/.test(key)) {
-      return "Global shortcuts need a modifier so normal typing stays safe.";
+      return UNSAFE_GLOBAL_SHORTCUT_MESSAGE;
     }
-    if (scope === "app" && FIXED_VALUES.has(normalized)) {
+    if (FIXED_VALUES.has(normalized)) {
       return "That shortcut is reserved for standard Cairn editing behavior.";
     }
   }
@@ -193,7 +200,7 @@ export function validateShortcut(
       !(entry.id === currentId && entry.scope === scope) &&
       normalizeShortcut(entry.shortcut) === normalized,
   );
-  if (duplicate) return "That shortcut is already assigned to another Cairn command.";
+  if (duplicate) return DUPLICATE_SHORTCUT_MESSAGE;
   return null;
 }
 

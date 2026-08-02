@@ -6,7 +6,15 @@ describe("copyBlock", () => {
     expect(copyBlock([{ content: " First " }, { content: "Second" }])).toBe("First\n\nSecond");
   });
 
-  it("omits empty cards and has no UI metadata", () => {
+  it("omits empty cards", () => {
     expect(copyBlock([{ content: "" }, { content: "A captured idea" }])).toBe("A captured idea");
+  });
+
+  it("omits whitespace-only cards", () => {
+    expect(copyBlock([{ content: "  \n " }, { content: "Kept" }])).toBe("Kept");
+  });
+
+  it("returns an empty string for an empty list", () => {
+    expect(copyBlock([])).toBe("");
   });
 });

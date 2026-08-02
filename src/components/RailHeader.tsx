@@ -6,6 +6,7 @@ import {
   Palette,
   Search,
   Trash2,
+  Power,
   X,
   Keyboard,
 } from "lucide-react";
@@ -16,12 +17,13 @@ interface RailHeaderProps {
   query: string;
   setQuery: (query: string) => void;
   searchRef: React.RefObject<HTMLInputElement | null>;
-  sectionId: string | "all";
+  sectionId: string | null;
   sections: Section[];
-  setSectionId: (id: string | "all") => void;
+  setSectionId: (id: string | null) => void;
   onAppearance: () => void;
   onKeybindings: () => void;
   onClear: () => void;
+  onQuit: () => void;
 }
 
 const menuItem =
@@ -37,8 +39,10 @@ export function RailHeader({
   onAppearance,
   onKeybindings,
   onClear,
+  onQuit,
 }: RailHeaderProps) {
   const currentSection = sections.find((section) => section.id === sectionId);
+  const currentLabel = sectionId === null ? "All" : (currentSection?.name ?? "Inbox");
   return (
     <header className="relative z-30 shrink-0 px-3 pb-2 pt-3" data-tauri-drag-region>
       <div className="flex items-center gap-2" data-tauri-drag-region>
@@ -65,9 +69,9 @@ export function RailHeader({
             <DropdownMenu.Trigger asChild>
               <button
                 className="ml-1 flex max-w-[104px] items-center gap-1 rounded-lg px-1.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-text)] outline-none hover:bg-[var(--muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                aria-label={`Filter by section. Current: ${currentSection?.name ?? "All"}`}
+                aria-label={`Filter by section. Current: ${currentLabel}`}
               >
-                <span className="truncate">{currentSection?.name ?? "All"}</span>
+                <span className="truncate">{currentLabel}</span>
                 <ChevronDown className="size-3 shrink-0" />
               </button>
             </DropdownMenu.Trigger>
@@ -85,13 +89,14 @@ export function RailHeader({
                   { id: "inbox", name: "Inbox" },
                   ...sections,
                 ].map((section) => {
-                  const value = section.id === "inbox" ? "" : section.id;
-                  const selected = (sectionId === "all" ? "all" : sectionId) === value;
+                  const value =
+                    section.id === "all" ? null : section.id === "inbox" ? "" : section.id;
+                  const selected = sectionId === value;
                   return (
                     <DropdownMenu.Item
                       key={section.id}
                       className={cn(menuItem, "justify-between")}
-                      onSelect={() => setSectionId(value as string | "all")}
+                      onSelect={() => setSectionId(value)}
                     >
                       <span className="max-w-44 truncate">{section.name}</span>
                       {selected ? <Check className="size-3.5 text-[var(--accent)]" /> : null}
@@ -137,6 +142,9 @@ export function RailHeader({
                 onSelect={onClear}
               >
                 <Trash2 className="size-4" /> Clear
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className={menuItem} onSelect={onQuit}>
+                <Power className="size-4 text-[var(--subtle)]" /> Quit Cairn
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>

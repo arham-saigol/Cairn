@@ -17,6 +17,7 @@ declare global {
 
 export const isTauri = Boolean(window.__TAURI_INTERNALS__);
 const STORAGE_KEY = "cairn-browser-preview-v1";
+const BACKUP_KEY = "cairn-browser-preview-backup-v1";
 
 const now = new Date().toISOString();
 const demoSnapshot: Snapshot = {
@@ -65,15 +66,83 @@ const demoSnapshot: Snapshot = {
 };
 
 let mockState: Snapshot = loadMock();
-let lastBackup: Snapshot | null = null;
+let lastBackup: Snapshot | null = loadStoredSnapshot(BACKUP_KEY);
+
+function isSnapshot(value: unknown): value is Snapshot {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<Snapshot>;
+  return (
+    Array.isArray(candidate.cards) &&
+    candidate.cards.every(
+      (card) =>
+        card &&
+        typeof card.id === "string" &&
+        typeof card.content === "string" &&
+        typeof card.completed === "boolean" &&
+        (card.sectionId === null || typeof card.sectionId === "string") &&
+        typeof card.sortOrder === "number" &&
+        (card.sourceProcess === null || typeof card.sourceProcess === "string") &&
+        (card.sourceWindowTitle === null || typeof card.sourceWindowTitle === "string") &&
+        typeof card.createdAt === "string" &&
+        typeof card.updatedAt === "string",
+    ) &&
+    Array.isArray(candidate.sections) &&
+    candidate.sections.every(
+      (section) =>
+        section &&
+        typeof section.id === "string" &&
+        typeof section.name === "string" &&
+        typeof section.sortOrder === "number" &&
+        typeof section.createdAt === "string",
+    ) &&
+    isSettings(candidate.settings)
+  );
+}
+
+function isSettings(value: unknown): value is AppSettings {
+  if (!value || typeof value !== "object") return false;
+  const settings = value as Partial<AppSettings>;
+  const appearance = settings.appearance;
+  const validShortcutMap = (candidate: unknown, keys: string[]) =>
+    Boolean(
+      candidate &&
+      typeof candidate === "object" &&
+      keys.every((key) => {
+        const shortcut = (candidate as Record<string, unknown>)[key];
+        return shortcut === null || typeof shortcut === "string";
+      }),
+    );
+  return Boolean(
+    appearance &&
+    ["light", "dark", "system"].includes(appearance.theme) &&
+    typeof appearance.opacity === "number" &&
+    ["blue", "teal", "violet", "amber", "rose"].includes(appearance.accent) &&
+    typeof settings.alwaysOnTop === "boolean" &&
+    validShortcutMap(settings.globalShortcuts, Object.keys(DEFAULT_SETTINGS.globalShortcuts)) &&
+    validShortcutMap(settings.appShortcuts, Object.keys(DEFAULT_SETTINGS.appShortcuts)),
+  );
+}
+
+function loadStoredSnapshot(key: string): Snapshot | null {
+  try {
+    const saved = localStorage.getItem(key);
+    if (!saved) return null;
+    const parsed: unknown = JSON.parse(saved);
+    if (isSnapshot(parsed)) return parsed;
+    localStorage.removeItem(key);
+  } catch {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // A locked-down preview may not expose localStorage.
+    }
+  }
+  return null;
+}
 
 function loadMock(): Snapshot {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved) as Snapshot;
-  } catch {
-    // A locked-down preview may not expose localStorage.
-  }
+  const saved = loadStoredSnapshot(STORAGE_KEY);
+  if (saved) return saved;
   return new URLSearchParams(location.search).has("demo")
     ? structuredClone(demoSnapshot)
     : { cards: [], sections: [], settings: structuredClone(DEFAULT_SETTINGS) };
@@ -82,6 +151,14 @@ function loadMock(): Snapshot {
 function persistMock() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(mockState));
+  } catch {
+    // The desktop build never relies on this path.
+  }
+}
+
+function persistBackup() {
+  try {
+    if (lastBackup) localStorage.setItem(BACKUP_KEY, JSON.stringify(lastBackup));
   } catch {
     // The desktop build never relies on this path.
   }
@@ -108,7 +185,7 @@ export async function createNote(content: string, sectionId: string | null): Pro
     content: content.trim(),
     sectionId,
     completed: false,
-    sortOrder: mockState.cards.length,
+    sortOrder: Math.max(-1, ...mockState.cards.map((card) => card.sortOrder)) + 1,
     sourceProcess: null,
     sourceWindowTitle: null,
     createdAt: stamp,
@@ -121,10 +198,18 @@ export async function createNote(content: string, sectionId: string | null): Pro
 
 export async function createSection(name: string): Promise<Section> {
   if (isTauri) return command<Section>("create_section", { name });
+  const normalizedName = name.trim().replace(/^#\s*/, "").trim();
+  if (
+    mockState.sections.some(
+      (section) => section.name.toLowerCase() === normalizedName.toLowerCase(),
+    )
+  ) {
+    throw new Error("A section with that name already exists.");
+  }
   const section: Section = {
     id: makeId(),
-    name: name.trim(),
-    sortOrder: mockState.sections.length,
+    name: normalizedName,
+    sortOrder: Math.max(-1, ...mockState.sections.map((item) => item.sortOrder)) + 1,
     createdAt: new Date().toISOString(),
   };
   mockState.sections.push(section);
@@ -134,7 +219,8 @@ export async function createSection(name: string): Promise<Section> {
 
 export async function updateCardContent(id: string, content: string): Promise<Card> {
   if (isTauri) return command<Card>("update_card_content", { id, content });
-  const card = mockState.cards.find((item) => item.id === id)!;
+  const card = mockState.cards.find((item) => item.id === id);
+  if (!card) throw new Error("That card no longer exists.");
   card.content = content.trim();
   card.updatedAt = new Date().toISOString();
   persistMock();
@@ -165,6 +251,7 @@ export async function mergeCards(ids: string[]): Promise<Card> {
     const card = mockState.cards.find((item) => item.id === id);
     return card ? [card] : [];
   });
+  if (selected.length < 2) throw new Error("Some selected cards no longer exist.");
   const first = selected[0];
   const merged: Card = {
     ...first,
@@ -189,11 +276,20 @@ export async function moveCards(ids: string[], sectionId: string | null) {
 
 export async function reorderCards(ids: string[]) {
   if (isTauri) return command<void>("reorder_cards", { ids });
-  const order = new Map(ids.map((id, index) => [id, index]));
-  mockState.cards.forEach((card) => {
-    if (order.has(card.id)) card.sortOrder = order.get(card.id)!;
+  const byId = new Map(mockState.cards.map((card) => [card.id, card]));
+  const seen = new Set<string>();
+  const ordered = ids.flatMap((id) => {
+    const card = byId.get(id);
+    if (!card || seen.has(id)) return [];
+    seen.add(id);
+    return [card];
   });
-  mockState.cards.sort((a, b) => a.sortOrder - b.sortOrder);
+  ordered.push(
+    ...mockState.cards
+      .filter((card) => !seen.has(card.id))
+      .sort((a, b) => a.sortOrder - b.sortOrder),
+  );
+  mockState.cards = ordered.map((card, sortOrder) => ({ ...card, sortOrder }));
   persistMock();
 }
 
@@ -224,6 +320,7 @@ export async function copyText(text: string) {
 export async function clearAll(): Promise<string> {
   if (isTauri) return command<string>("clear_all");
   lastBackup = structuredClone(mockState);
+  persistBackup();
   mockState.cards = [];
   mockState.sections = [];
   persistMock();
@@ -262,6 +359,14 @@ export async function hideRail() {
 
 export async function restorePreviousWindow() {
   if (isTauri) return command<void>("restore_previous_window");
+}
+
+export async function rememberPreviousWindow() {
+  if (isTauri) return command<void>("remember_previous_window");
+}
+
+export async function quitApp() {
+  if (isTauri) return command<void>("quit_app");
 }
 
 export async function toggleAlwaysOnTop(): Promise<boolean> {

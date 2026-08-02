@@ -1,13 +1,18 @@
 use crate::models::{AppSettings, Card, ContentBackup, Section, Snapshot};
 use chrono::{SecondsFormat, Utc};
 use parking_lot::Mutex;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
-use std::{collections::HashMap, path::Path};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Transaction};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 use uuid::Uuid;
 
 pub struct Database {
     connection: Mutex<Connection>,
 }
+
+const CARD_COLUMNS: &str = "id, content, completed, section_id, sort_order, source_process, source_window_title, created_at, updated_at";
 
 impl Database {
     pub fn open(path: &Path) -> Result<Self, String> {
@@ -23,6 +28,7 @@ impl Database {
                 "PRAGMA journal_mode=WAL;
                  PRAGMA foreign_keys=ON;
                  PRAGMA busy_timeout=5000;
+                 PRAGMA user_version=1;
                  CREATE TABLE IF NOT EXISTS sections (
                    id TEXT PRIMARY KEY,
                    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -60,22 +66,12 @@ impl Database {
 
     pub fn bootstrap(&self) -> Result<Snapshot, String> {
         let connection = self.connection.lock();
-        let cards = list_cards(&connection)?;
-        let sections = list_sections(&connection)?;
-        let settings_json: Option<String> = connection
-            .query_row("SELECT value FROM settings WHERE key = 'app'", [], |row| {
-                row.get(0)
-            })
-            .optional()
-            .map_err(|error| error.to_string())?;
-        let settings = settings_json
-            .and_then(|value| serde_json::from_str(&value).ok())
-            .unwrap_or_default();
-        Ok(Snapshot {
-            cards,
-            sections,
-            settings,
-        })
+        read_snapshot(&connection)
+    }
+
+    pub fn load_settings(&self) -> Result<AppSettings, String> {
+        let connection = self.connection.lock();
+        read_settings(&connection)
     }
 
     pub fn save_settings(&self, settings: &AppSettings) -> Result<(), String> {
@@ -90,7 +86,37 @@ impl Database {
             .map_err(|error| error.to_string())?;
         Ok(())
     }
+}
 
+fn read_settings(connection: &Connection) -> Result<AppSettings, String> {
+    let settings_json: Option<String> = connection
+        .query_row("SELECT value FROM settings WHERE key = 'app'", [], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let settings = match settings_json {
+        Some(value) => serde_json::from_str(&value).unwrap_or_else(|error| {
+            eprintln!("Ignoring invalid saved settings {value:?}: {error}");
+            AppSettings::default()
+        }),
+        None => AppSettings::default(),
+    };
+    Ok(settings)
+}
+
+fn read_snapshot(connection: &Connection) -> Result<Snapshot, String> {
+    let cards = list_cards(connection)?;
+    let sections = list_sections(connection)?;
+    let settings = read_settings(connection)?;
+    Ok(Snapshot {
+        cards,
+        sections,
+        settings,
+    })
+}
+
+impl Database {
     pub fn create_note(
         &self,
         content: &str,
@@ -156,7 +182,11 @@ impl Database {
                 ],
             )
             .map_err(|error| {
-                if error.to_string().contains("UNIQUE") {
+                if matches!(
+                    error,
+                    rusqlite::Error::SqliteFailure(ref details, _)
+                        if details.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                ) {
                     "A section with that name already exists.".into()
                 } else {
                     error.to_string()
@@ -193,12 +223,13 @@ impl Database {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        let updated_at = timestamp();
         let mut changed = Vec::new();
         for id in ids {
             let count = transaction
                 .execute(
                     "UPDATE cards SET completed = ?1, updated_at = ?2 WHERE id = ?3 AND completed != ?1",
-                    params![completed as i64, timestamp(), id],
+                    params![completed as i64, updated_at, id],
                 )
                 .map_err(|error| error.to_string())?;
             if count > 0 {
@@ -228,11 +259,12 @@ impl Database {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        let updated_at = timestamp();
         for id in ids {
             transaction
                 .execute(
                     "UPDATE cards SET section_id = ?1, updated_at = ?2 WHERE id = ?3",
-                    params![section_id, timestamp(), id],
+                    params![section_id, updated_at, id],
                 )
                 .map_err(|error| error.to_string())?;
         }
@@ -242,10 +274,27 @@ impl Database {
 
     pub fn reorder_cards(&self, ids: &[String]) -> Result<(), String> {
         let mut connection = self.connection.lock();
+        let persisted = list_cards(&connection)?;
+        let submitted: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let mut included = HashSet::new();
+        let mut complete_order: Vec<&str> = ids
+            .iter()
+            .filter(|id| {
+                included.insert(id.as_str())
+                    && persisted.iter().any(|card| card.id.as_str() == id.as_str())
+            })
+            .map(String::as_str)
+            .collect();
+        complete_order.extend(
+            persisted
+                .iter()
+                .filter(|card| !submitted.contains(card.id.as_str()))
+                .map(|card| card.id.as_str()),
+        );
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
-        for (index, id) in ids.iter().enumerate() {
+        for (index, id) in complete_order.iter().enumerate() {
             transaction
                 .execute(
                     "UPDATE cards SET sort_order = ?1 WHERE id = ?2",
@@ -262,7 +311,7 @@ impl Database {
             return Err("Select two or more cards to merge.".into());
         }
         let mut connection = self.connection.lock();
-        let cards = list_cards(&connection)?;
+        let cards = list_cards_by_ids(&connection, ids)?;
         let selected: Vec<Card> = ids
             .iter()
             .filter_map(|id| cards.iter().find(|card| card.id == *id).cloned())
@@ -327,7 +376,7 @@ impl Database {
             .map_err(|error| error.to_string())?;
         transaction
             .execute(
-                "DELETE FROM backups WHERE id NOT IN (SELECT id FROM backups ORDER BY created_at DESC LIMIT 10)",
+                "DELETE FROM backups WHERE id NOT IN (SELECT id FROM backups ORDER BY created_at DESC, rowid DESC LIMIT 10)",
                 [],
             )
             .map_err(|error| error.to_string())?;
@@ -351,8 +400,7 @@ impl Database {
             .map_err(|error| error.to_string())?;
         restore_content(&transaction, &backup)?;
         transaction.commit().map_err(|error| error.to_string())?;
-        drop(connection);
-        self.bootstrap()
+        read_snapshot(&connection)
     }
 }
 
@@ -363,8 +411,9 @@ fn timestamp() -> String {
 fn insert_card(connection: &Connection, card: &Card) -> Result<(), String> {
     connection
         .execute(
-            "INSERT INTO cards(id, content, completed, section_id, sort_order, source_process, source_window_title, created_at, updated_at)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            &format!(
+                "INSERT INTO cards({CARD_COLUMNS}) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+            ),
             params![
                 card.id,
                 card.content,
@@ -447,25 +496,31 @@ fn restore_content(transaction: &Transaction<'_>, backup: &ContentBackup) -> Res
 
 fn list_cards(connection: &Connection) -> Result<Vec<Card>, String> {
     let mut statement = connection
-        .prepare(
-            "SELECT id, content, completed, section_id, sort_order, source_process, source_window_title, created_at, updated_at
-             FROM cards ORDER BY sort_order ASC, created_at ASC",
-        )
+        .prepare(&format!(
+            "SELECT {CARD_COLUMNS} FROM cards ORDER BY sort_order ASC, created_at ASC"
+        ))
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map([], |row| {
-            Ok(Card {
-                id: row.get(0)?,
-                content: row.get(1)?,
-                completed: row.get::<_, i64>(2)? != 0,
-                section_id: row.get(3)?,
-                sort_order: row.get(4)?,
-                source_process: row.get(5)?,
-                source_window_title: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
-            })
-        })
+        .query_map([], card_from_row)
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+fn list_cards_by_ids(connection: &Connection, ids: &[String]) -> Result<Vec<Card>, String> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT {CARD_COLUMNS} FROM cards WHERE id IN ({placeholders})"
+        ))
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params_from_iter(ids), card_from_row)
         .map_err(|error| error.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())
@@ -492,23 +547,25 @@ fn list_sections(connection: &Connection) -> Result<Vec<Section>, String> {
 fn get_card(connection: &Connection, id: &str) -> Result<Card, String> {
     connection
         .query_row(
-            "SELECT id, content, completed, section_id, sort_order, source_process, source_window_title, created_at, updated_at FROM cards WHERE id = ?1",
+            &format!("SELECT {CARD_COLUMNS} FROM cards WHERE id = ?1"),
             [id],
-            |row| {
-                Ok(Card {
-                    id: row.get(0)?,
-                    content: row.get(1)?,
-                    completed: row.get::<_, i64>(2)? != 0,
-                    section_id: row.get(3)?,
-                    sort_order: row.get(4)?,
-                    source_process: row.get(5)?,
-                    source_window_title: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                })
-            },
+            card_from_row,
         )
         .map_err(|error| error.to_string())
+}
+
+fn card_from_row(row: &Row<'_>) -> rusqlite::Result<Card> {
+    Ok(Card {
+        id: row.get(0)?,
+        content: row.get(1)?,
+        completed: row.get::<_, i64>(2)? != 0,
+        section_id: row.get(3)?,
+        sort_order: row.get(4)?,
+        source_process: row.get(5)?,
+        source_window_title: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
 }
 
 #[cfg(test)]
@@ -568,5 +625,48 @@ mod tests {
             .map(|card| card.content.as_str())
             .collect();
         assert_eq!(contents, ["After clear", "Before clear"]);
+    }
+
+    #[test]
+    fn partial_reorder_keeps_every_card_in_a_unique_position() {
+        let db = database();
+        let first = db.create_note("First", None, None, None).unwrap();
+        let second = db.create_note("Second", None, None, None).unwrap();
+        db.create_note("Third", None, None, None).unwrap();
+
+        db.reorder_cards(&[second.id, first.id]).unwrap();
+
+        let contents: Vec<_> = db
+            .bootstrap()
+            .unwrap()
+            .cards
+            .into_iter()
+            .map(|card| card.content)
+            .collect();
+        assert_eq!(contents, ["Second", "First", "Third"]);
+    }
+
+    #[test]
+    fn clear_prunes_backups_to_the_ten_newest() {
+        let db = database();
+        for _ in 0..11 {
+            db.clear_all().unwrap();
+        }
+        let count: i64 = db
+            .connection
+            .lock()
+            .query_row("SELECT COUNT(*) FROM backups", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 10);
+    }
+
+    #[test]
+    fn duplicate_section_name_has_a_friendly_error() {
+        let db = database();
+        db.create_section("Research").unwrap();
+        assert_eq!(
+            db.create_section("research").unwrap_err(),
+            "A section with that name already exists."
+        );
     }
 }

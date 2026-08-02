@@ -49,6 +49,12 @@ use windows::{
     },
 };
 
+const RAIL_MARGIN: i32 = 24;
+const RAIL_OFFSET: i32 = 12;
+const MIN_RAIL_WIDTH: i32 = 340;
+const MIN_RAIL_HEIGHT: i32 = 480;
+const UIA_TIMEOUT: Duration = Duration::from_millis(1500);
+
 #[derive(Debug, Clone)]
 pub struct SourceContext {
     pub hwnd: HWND,
@@ -59,7 +65,7 @@ pub struct SourceContext {
 // HWND values are opaque process-local handles. The wrapper makes the stored value explicit and
 // keeps raw Win32 handles out of the cross-thread application state.
 #[derive(Default)]
-pub struct PreviousWindow(parking_lot::Mutex<Option<usize>>);
+pub struct PreviousWindow(parking_lot::Mutex<Option<(usize, u32)>>);
 
 impl PreviousWindow {
     pub fn remember(&self, cairn_hwnd: Option<HWND>) -> Option<HWND> {
@@ -67,28 +73,41 @@ impl PreviousWindow {
         if foreground.0.is_null() || cairn_hwnd.is_some_and(|window| window == foreground) {
             return self.get();
         }
-        *self.0.lock() = Some(foreground.0 as usize);
+        if let Some(identity) = window_identity(foreground) {
+            *self.0.lock() = Some(identity);
+        }
         Some(foreground)
     }
 
     pub fn set(&self, hwnd: HWND) {
         if !hwnd.0.is_null() {
-            *self.0.lock() = Some(hwnd.0 as usize);
+            if let Some(identity) = window_identity(hwnd) {
+                *self.0.lock() = Some(identity);
+            }
         }
     }
 
     pub fn get(&self) -> Option<HWND> {
         self.0
             .lock()
-            .map(|value| HWND(value as *mut std::ffi::c_void))
+            .map(|(value, _)| HWND(value as *mut std::ffi::c_void))
     }
 
     pub fn restore(&self) -> Result<(), String> {
-        let hwnd = self
-            .get()
+        let (value, expected_process_id) = self
+            .0
+            .lock()
+            .as_ref()
+            .copied()
             .ok_or_else(|| "There is no previous window to restore.".to_string())?;
+        let hwnd = HWND(value as *mut std::ffi::c_void);
         unsafe {
             if !IsWindow(Some(hwnd)).as_bool() {
+                return Err("The previous window is no longer open.".into());
+            }
+            let mut current_process_id = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut current_process_id));
+            if current_process_id != expected_process_id {
                 return Err("The previous window is no longer open.".into());
             }
             if IsIconic(hwnd).as_bool() {
@@ -100,6 +119,12 @@ impl PreviousWindow {
         }
         Ok(())
     }
+}
+
+fn window_identity(hwnd: HWND) -> Option<(usize, u32)> {
+    let mut process_id = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut process_id)) };
+    (process_id != 0).then_some((hwnd.0 as usize, process_id))
 }
 
 pub fn window_hwnd(window: &WebviewWindow) -> Result<HWND, String> {
@@ -130,15 +155,19 @@ pub fn position_rail(window: &WebviewWindow, anchor: Option<HWND>) -> Result<(),
         let work_width = info.rcWork.right - info.rcWork.left;
         let work_height = info.rcWork.bottom - info.rcWork.top;
         let current = window.outer_size().map_err(|error| error.to_string())?;
-        let width = (current.width as i32).min(work_width - 24).max(340);
-        let height = (current.height as i32).min(work_height - 24).max(480);
+        let width = (current.width as i32)
+            .max(MIN_RAIL_WIDTH)
+            .min(work_width - RAIL_MARGIN);
+        let height = (current.height as i32)
+            .max(MIN_RAIL_HEIGHT)
+            .min(work_height - RAIL_MARGIN);
         if width != current.width as i32 || height != current.height as i32 {
             window
                 .set_size(PhysicalSize::new(width as u32, height as u32))
                 .map_err(|error| error.to_string())?;
         }
-        let x = info.rcWork.right - width - 12;
-        let y = info.rcWork.top + 12;
+        let x = info.rcWork.right - width - RAIL_OFFSET;
+        let y = info.rcWork.top + RAIL_OFFSET;
         SetWindowPos(
             hwnd,
             None,
@@ -163,7 +192,7 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
             return Ok((text, context));
         }
     }
-    let text = selected_text_clipboard_fallback()?;
+    let text = selected_text_clipboard_fallback(context.hwnd)?;
     if text.trim().is_empty() {
         return Err("No selected text was found. Select text in another app and try again.".into());
     }
@@ -171,6 +200,19 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
 }
 
 fn selected_text_uia() -> Result<String, String> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    thread::Builder::new()
+        .name("cairn-uia-capture".into())
+        .spawn(move || {
+            let _ = sender.send(selected_text_uia_sta());
+        })
+        .map_err(|error| error.to_string())?;
+    receiver
+        .recv_timeout(UIA_TIMEOUT)
+        .map_err(|_| "UI Automation did not respond in time.".to_string())?
+}
+
+fn selected_text_uia_sta() -> Result<String, String> {
     unsafe {
         let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
         let result = (|| {
@@ -205,16 +247,34 @@ fn selected_text_uia() -> Result<String, String> {
     }
 }
 
-fn selected_text_clipboard_fallback() -> Result<String, String> {
+fn selected_text_clipboard_fallback(foreground: HWND) -> Result<String, String> {
+    let foreground = foreground.0 as usize;
     thread::Builder::new()
         .name("cairn-clipboard-capture".into())
-        .spawn(clipboard_fallback_sta)
+        .spawn(move || clipboard_fallback_sta(HWND(foreground as *mut std::ffi::c_void)))
         .map_err(|error| error.to_string())?
         .join()
         .map_err(|_| "The clipboard capture worker stopped unexpectedly.".to_string())?
 }
 
-fn clipboard_fallback_sta() -> Result<String, String> {
+fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
+    const CONSOLE_PROCESSES: &[&str] = &[
+        "conhost",
+        "openconsole",
+        "windowsterminal",
+        "cmd",
+        "powershell",
+        "pwsh",
+    ];
+    let not_found =
+        || "No selected text was found. Select text in another app and try again.".to_string();
+    if process_name(expected_foreground).is_some_and(|name| {
+        CONSOLE_PROCESSES
+            .iter()
+            .any(|console| name.eq_ignore_ascii_case(console))
+    }) {
+        return Err(not_found());
+    }
     unsafe {
         OleInitialize(None).map_err(|error| error.to_string())?;
         let original = OleGetClipboard().ok();
@@ -224,6 +284,10 @@ fn clipboard_fallback_sta() -> Result<String, String> {
         if let Err(error) = wait_for_modifiers_release() {
             OleUninitialize();
             return Err(error);
+        }
+        if GetForegroundWindow() != expected_foreground {
+            OleUninitialize();
+            return Err(not_found());
         }
         let sequence = GetClipboardSequenceNumber();
         if let Err(error) = send_ctrl_c() {

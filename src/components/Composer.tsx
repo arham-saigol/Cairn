@@ -1,6 +1,9 @@
 import { CornerDownLeft, Hash, Plus } from "lucide-react";
 import { motion } from "motion/react";
+import { useEffect } from "react";
 import { cn } from "../lib/utils";
+
+export const SECTION_INPUT_PATTERN = /^#\s+\S/;
 
 interface ComposerProps {
   value: string;
@@ -11,7 +14,15 @@ interface ComposerProps {
 }
 
 export function Composer({ value, setValue, inputRef, onSubmit, sectionName }: ComposerProps) {
-  const creatingSection = value.trimStart().startsWith("#");
+  const creatingSection = SECTION_INPUT_PATTERN.test(value.trimStart());
+
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(116, textarea.scrollHeight)}px`;
+  }, [inputRef, value]);
+
   return (
     <div className="relative z-40 shrink-0 px-3 pb-3 pt-2">
       <motion.div
@@ -32,13 +43,9 @@ export function Composer({ value, setValue, inputRef, onSubmit, sectionName }: C
             ref={inputRef}
             rows={1}
             value={value}
-            onChange={(event) => {
-              setValue(event.target.value);
-              event.currentTarget.style.height = "auto";
-              event.currentTarget.style.height = `${Math.min(116, event.currentTarget.scrollHeight)}px`;
-            }}
+            onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 void onSubmit();
               }

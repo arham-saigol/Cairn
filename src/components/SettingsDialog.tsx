@@ -15,7 +15,7 @@ import {
   Sun,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   APP_SHORTCUTS,
   FIXED_SHORTCUTS,
@@ -107,13 +107,6 @@ function ShortcutRecorder({
   const lastModifier = useRef<{ key: string; at: number } | null>(null);
   const recorderRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setCandidate(null);
-    setPressed([]);
-    setError(null);
-    lastModifier.current = null;
-  }, [target]);
-
   const currentValue = target
     ? target.scope === "global"
       ? settings.globalShortcuts[target.id]
@@ -142,6 +135,7 @@ function ShortcutRecorder({
             onClose();
           }}
           onKeyDown={(event) => {
+            if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) return;
             event.preventDefault();
             event.stopPropagation();
             if (event.key === "Escape") return onClose();
@@ -151,6 +145,7 @@ function ShortcutRecorder({
             if (value) propose(value);
           }}
           onKeyUp={(event) => {
+            if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) return;
             event.preventDefault();
             event.stopPropagation();
             const key = normalizeKeyName(event.key);
@@ -253,10 +248,6 @@ export function SettingsDialog({
 }) {
   const [tab, setTab] = useState(initialTab);
   const [recorder, setRecorder] = useState<RecorderTarget | null>(null);
-
-  useEffect(() => {
-    if (open) setTab(initialTab);
-  }, [initialTab, open]);
 
   const recorderDefault = useMemo(() => {
     if (!recorder) return null;
@@ -547,6 +538,7 @@ export function SettingsDialog({
       </Dialog.Root>
 
       <ShortcutRecorder
+        key={recorder ? `${recorder.scope}:${recorder.id}` : "closed"}
         target={recorder}
         settings={settings}
         onClose={() => setRecorder(null)}

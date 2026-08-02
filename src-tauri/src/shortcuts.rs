@@ -9,21 +9,26 @@ use std::{
 use tauri::{AppHandle, Emitter};
 use windows::Win32::{
     Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
-    System::LibraryLoader::GetModuleHandleW,
+    System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
     UI::{
         Input::KeyboardAndMouse::{
             RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL,
             MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY, VK_CONTROL, VK_DELETE, VK_DOWN,
-            VK_ESCAPE, VK_F1, VK_LEFT, VK_MENU, VK_OEM_COMMA, VK_OEM_PERIOD, VK_RETURN, VK_RIGHT,
-            VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+            VK_ESCAPE, VK_F1, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_MENU, VK_OEM_COMMA,
+            VK_OEM_PERIOD, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_SHIFT,
+            VK_SPACE, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
-            CallNextHookEx, DispatchMessageW, PeekMessageW, SetWindowsHookExW, TranslateMessage,
-            UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, PM_REMOVE, WH_KEYBOARD_LL,
-            WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+            CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW,
+            SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT,
+            MSG, PM_NOREMOVE, PM_REMOVE, WH_KEYBOARD_LL, WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+            WM_SYSKEYDOWN, WM_SYSKEYUP,
         },
     },
 };
+
+const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(420);
+const WM_CAIRN_WAKE: u32 = WM_APP + 1;
 
 enum ServiceCommand {
     Configure(
@@ -35,16 +40,21 @@ enum ServiceCommand {
 
 pub struct ShortcutService {
     sender: mpsc::Sender<ServiceCommand>,
+    thread_id: u32,
 }
 
 impl ShortcutService {
     pub fn start(app: AppHandle, settings: &AppSettings) -> Result<Self, String> {
         let (sender, receiver) = mpsc::channel();
-        let service = Self { sender };
+        let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("cairn-shortcuts".into())
-            .spawn(move || shortcut_loop(app, receiver))
+            .spawn(move || shortcut_loop(app, receiver, ready_sender))
             .map_err(|error| error.to_string())?;
+        let thread_id = ready_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| "The global shortcut service did not start in time.".to_string())?;
+        let service = Self { sender, thread_id };
         if let Err(error) = service.configure(&settings.global_shortcuts) {
             eprintln!("Global shortcuts are disabled until they are reconfigured: {error}");
         }
@@ -56,15 +66,22 @@ impl ShortcutService {
         self.sender
             .send(ServiceCommand::Configure(shortcuts.clone(), sender))
             .map_err(|_| "The global shortcut service is not running.".to_string())?;
+        self.wake()?;
         receiver
             .recv_timeout(Duration::from_secs(2))
             .map_err(|_| "The global shortcut service did not respond.".to_string())?
+    }
+
+    fn wake(&self) -> Result<(), String> {
+        unsafe { PostThreadMessageW(self.thread_id, WM_CAIRN_WAKE, WPARAM(0), LPARAM(0)) }
+            .map_err(|error| error.to_string())
     }
 }
 
 impl Drop for ShortcutService {
     fn drop(&mut self) {
         let _ = self.sender.send(ServiceCommand::Stop);
+        let _ = self.wake();
     }
 }
 
@@ -74,6 +91,7 @@ struct TapState {
     chorded: HashSet<u32>,
     last_release: Option<(u32, Instant)>,
     sender: mpsc::Sender<String>,
+    thread_id: u32,
 }
 
 static TAP_STATE: OnceLock<Mutex<TapState>> = OnceLock::new();
@@ -105,10 +123,16 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     } else {
                         let now = Instant::now();
                         if state.last_release.is_some_and(|(previous, at)| {
-                            previous == key && now.duration_since(at) <= Duration::from_millis(420)
+                            previous == key && now.duration_since(at) <= DOUBLE_TAP_WINDOW
                         }) {
                             if let Some(action) = state.actions.get(&key).cloned() {
                                 let _ = state.sender.send(action);
+                                let _ = PostThreadMessageW(
+                                    state.thread_id,
+                                    WM_CAIRN_WAKE,
+                                    WPARAM(0),
+                                    LPARAM(0),
+                                );
                             }
                             state.last_release = None;
                         } else {
@@ -126,7 +150,16 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     CallNextHookEx(None, code, wparam, lparam)
 }
 
-fn shortcut_loop(app: AppHandle, receiver: mpsc::Receiver<ServiceCommand>) {
+fn shortcut_loop(
+    app: AppHandle,
+    receiver: mpsc::Receiver<ServiceCommand>,
+    ready: mpsc::SyncSender<u32>,
+) {
+    let thread_id = unsafe { GetCurrentThreadId() };
+    let mut initial_message = MSG::default();
+    unsafe {
+        let _ = PeekMessageW(&mut initial_message, None, 0, 0, PM_NOREMOVE);
+    }
     let (tap_sender, tap_receiver) = mpsc::channel();
     let _ = TAP_STATE.set(Mutex::new(TapState {
         actions: HashMap::new(),
@@ -134,7 +167,9 @@ fn shortcut_loop(app: AppHandle, receiver: mpsc::Receiver<ServiceCommand>) {
         chorded: HashSet::new(),
         last_release: None,
         sender: tap_sender,
+        thread_id,
     }));
+    let _ = ready.send(thread_id);
     let module = unsafe { GetModuleHandleW(None).ok() };
     let hook = module.and_then(|module| unsafe {
         SetWindowsHookExW(
@@ -164,35 +199,48 @@ fn shortcut_loop(app: AppHandle, receiver: mpsc::Receiver<ServiceCommand>) {
             }
         }
 
-        let mut message = MSG::default();
-        unsafe {
-            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
-                if message.message == WM_HOTKEY {
-                    if let Some(action) = registrations.get(&(message.wParam.0 as i32)) {
-                        let _ = app.emit(
-                            "global-shortcut",
-                            GlobalShortcutEvent {
-                                action: action.clone(),
-                            },
-                        );
-                    }
-                } else {
-                    let _ = TranslateMessage(&message);
-                    DispatchMessageW(&message);
-                }
-            }
-        }
-
         while let Ok(action) = tap_receiver.try_recv() {
             let _ = app.emit("global-shortcut", GlobalShortcutEvent { action });
         }
-        thread::sleep(Duration::from_millis(8));
+        if !running {
+            break;
+        }
+
+        let mut message = MSG::default();
+        let received = unsafe { GetMessageW(&mut message, None, 0, 0) };
+        if received.0 <= 0 {
+            break;
+        }
+        dispatch_message(&app, &registrations, &message);
+        unsafe {
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                dispatch_message(&app, &registrations, &message);
+            }
+        }
     }
 
     unregister_all(&registrations);
     if let Some(hook) = hook {
         unsafe {
             let _ = UnhookWindowsHookEx(hook);
+        }
+    }
+}
+
+fn dispatch_message(app: &AppHandle, registrations: &HashMap<i32, String>, message: &MSG) {
+    if message.message == WM_HOTKEY {
+        if let Some(action) = registrations.get(&(message.wParam.0 as i32)) {
+            let _ = app.emit(
+                "global-shortcut",
+                GlobalShortcutEvent {
+                    action: action.clone(),
+                },
+            );
+        }
+    } else if message.message != WM_CAIRN_WAKE {
+        unsafe {
+            let _ = TranslateMessage(message);
+            DispatchMessageW(message);
         }
     }
 }
@@ -328,9 +376,15 @@ fn parse_key(value: &str) -> Result<VIRTUAL_KEY, String> {
 
 fn canonical_modifier(key: u32) -> Option<u32> {
     match key {
-        0x11 | 0xA2 | 0xA3 => Some(VK_CONTROL.0 as u32),
-        0x12 | 0xA4 | 0xA5 => Some(VK_MENU.0 as u32),
-        0x10 | 0xA0 | 0xA1 => Some(VK_SHIFT.0 as u32),
+        value if [VK_CONTROL, VK_LCONTROL, VK_RCONTROL].contains(&VIRTUAL_KEY(value as u16)) => {
+            Some(VK_CONTROL.0 as u32)
+        }
+        value if [VK_MENU, VK_LMENU, VK_RMENU].contains(&VIRTUAL_KEY(value as u16)) => {
+            Some(VK_MENU.0 as u32)
+        }
+        value if [VK_SHIFT, VK_LSHIFT, VK_RSHIFT].contains(&VIRTUAL_KEY(value as u16)) => {
+            Some(VK_SHIFT.0 as u32)
+        }
         _ => None,
     }
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizeShortcut, validateShortcut } from "./keybindings";
+import {
+  DUPLICATE_SHORTCUT_MESSAGE,
+  normalizeShortcut,
+  UNSAFE_GLOBAL_SHORTCUT_MESSAGE,
+  validateShortcut,
+  WINDOWS_RESERVED_SHORTCUT_MESSAGE,
+} from "./keybindings";
 import { DEFAULT_SETTINGS } from "../types";
 
 describe("keybinding validation", () => {
@@ -8,22 +14,51 @@ describe("keybinding validation", () => {
   });
 
   it("blocks unsafe unmodified global shortcuts", () => {
-    expect(validateShortcut("K", "global", "clearAll", DEFAULT_SETTINGS)).toContain(
-      "need a modifier",
+    expect(validateShortcut("K", "global", "clearAll", DEFAULT_SETTINGS)).toBe(
+      UNSAFE_GLOBAL_SHORTCUT_MESSAGE,
     );
   });
 
   it("blocks Windows-reserved shortcuts", () => {
-    expect(validateShortcut("Alt+F4", "global", "clearAll", DEFAULT_SETTINGS)).toContain("closing");
+    expect(validateShortcut("Alt+F4", "global", "clearAll", DEFAULT_SETTINGS)).toBe(
+      WINDOWS_RESERVED_SHORTCUT_MESSAGE,
+    );
   });
 
   it("detects duplicates", () => {
-    expect(validateShortcut("Ctrl+Alt+G", "global", "clearAll", DEFAULT_SETTINGS)).toContain(
-      "already assigned",
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.globalShortcuts.showHide = "Ctrl+Alt+G";
+    expect(validateShortcut("Ctrl+Alt+G", "global", "clearAll", settings)).toBe(
+      DUPLICATE_SHORTCUT_MESSAGE,
     );
   });
 
   it("allows practical modifier double-taps", () => {
     expect(validateShortcut("DoubleTap:Shift", "global", "clearAll", DEFAULT_SETTINGS)).toBeNull();
+  });
+
+  it("covers global function-key boundaries", () => {
+    expect(validateShortcut("F24", "global", "clearAll", DEFAULT_SETTINGS)).toBeNull();
+    expect(validateShortcut("F25", "global", "clearAll", DEFAULT_SETTINGS)).toBe(
+      UNSAFE_GLOBAL_SHORTCUT_MESSAGE,
+    );
+  });
+
+  it("rejects invalid double-taps", () => {
+    expect(validateShortcut("DoubleTap:Shift", "app", "editFocused", DEFAULT_SETTINGS)).toBe(
+      "Modifier double-taps are available for global shortcuts only.",
+    );
+    expect(validateShortcut("DoubleTap:Win", "global", "clearAll", DEFAULT_SETTINGS)).toBe(
+      "Only Ctrl, Alt, and Shift can be used as double-tap shortcuts.",
+    );
+  });
+
+  it("rejects modifier-only and empty shortcuts", () => {
+    expect(validateShortcut("Ctrl+Shift", "global", "clearAll", DEFAULT_SETTINGS)).toBe(
+      "Add a non-modifier key, or double-tap a modifier.",
+    );
+    expect(validateShortcut("", "global", "clearAll", DEFAULT_SETTINGS)).toBe(
+      "Press a key or key combination.",
+    );
   });
 });

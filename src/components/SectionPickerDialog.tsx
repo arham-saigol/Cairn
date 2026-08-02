@@ -35,11 +35,7 @@ export function SectionPickerDialog({
               <X className="size-4" />
             </Dialog.Close>
           </div>
-          <div
-            className="mt-3 max-h-72 space-y-1 overflow-y-auto"
-            role="listbox"
-            aria-label="Sections"
-          >
+          <div className="mt-3 max-h-72 space-y-1 overflow-y-auto" aria-label="Sections">
             {options.map((section) => (
               <button
                 key={section.id ?? "inbox"}

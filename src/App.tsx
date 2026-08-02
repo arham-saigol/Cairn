@@ -15,7 +15,16 @@ import {
 } from "@dnd-kit/sortable";
 import { FilePlus2, SearchX, Sparkles } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   bootstrap,
   captureSelection,
@@ -29,6 +38,8 @@ import {
   moveCards,
   onFocusNewCard,
   onGlobalShortcut,
+  quitApp,
+  rememberPreviousWindow,
   reorderCards,
   restoreBackup,
   restorePreviousWindow,
@@ -40,7 +51,7 @@ import {
   updateCardContent,
 } from "./api";
 import { CardItem, type CardItemHandle } from "./components/CardItem";
-import { Composer } from "./components/Composer";
+import { Composer, SECTION_INPUT_PATTERN } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { RailHeader } from "./components/RailHeader";
 import { SectionPickerDialog } from "./components/SectionPickerDialog";
@@ -68,7 +79,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [sectionId, setSectionId] = useState<string | "all">("all");
+  const [sectionId, setSectionId] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -84,7 +95,6 @@ export default function App() {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const toastId = useRef(0);
   const cardRefs = useRef(new Map<string, CardItemHandle>());
-  const globalActionRef = useRef<(event: GlobalShortcutEvent) => void>(() => undefined);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
 
@@ -108,13 +118,15 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    void Promise.resolve().then(load);
+  }, [load]);
 
   const visibleCards = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return cards.filter((card) => {
       const inSection =
-        sectionId === "all" ||
+        sectionId === null ||
         (sectionId === "" ? card.sectionId === null : card.sectionId === sectionId);
       if (!inSection) return false;
       if (!needle) return true;
@@ -127,7 +139,7 @@ export default function App() {
   }, [cards, query, sectionId, sections]);
 
   const groups = useMemo(() => {
-    if (sectionId !== "all") {
+    if (sectionId !== null) {
       const name =
         sectionId === ""
           ? "Inbox"
@@ -150,12 +162,15 @@ export default function App() {
   const renderedCards = useMemo(() => groups.flatMap((group) => group.cards), [groups]);
 
   useEffect(() => {
-    if (!renderedCards.some((card) => card.id === focused))
-      setFocused(renderedCards[0]?.id ?? null);
-    setSelected(
-      (current) =>
-        new Set([...current].filter((id) => renderedCards.some((card) => card.id === id))),
-    );
+    const frame = requestAnimationFrame(() => {
+      if (!renderedCards.some((card) => card.id === focused))
+        setFocused(renderedCards[0]?.id ?? null);
+      setSelected(
+        (current) =>
+          new Set([...current].filter((id) => renderedCards.some((card) => card.id === id))),
+      );
+    });
+    return () => cancelAnimationFrame(frame);
   }, [renderedCards, focused]);
 
   useEffect(() => {
@@ -186,13 +201,16 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  function notify(message: string, options?: Omit<ToastState, "id" | "message">) {
+  const notify = useCallback((message: string, options?: Omit<ToastState, "id" | "message">) => {
     setToast({ id: ++toastId.current, message, ...options });
-  }
+  }, []);
 
-  function showError(error: unknown) {
-    notify(error instanceof Error ? error.message : String(error), { kind: "info" });
-  }
+  const showError = useCallback(
+    (error: unknown) => {
+      notify(error instanceof Error ? error.message : String(error), { kind: "info" });
+    },
+    [notify],
+  );
 
   function actionIds(cardId?: string) {
     const orderedSelection = renderedCards
@@ -206,22 +224,23 @@ export default function App() {
 
   const copyCards = useCallback(
     async (complete: boolean, returnFocus: boolean, forcedIds?: string[]) => {
-      const ids = forcedIds ?? (selected.size ? [...selected] : focused ? [focused] : []);
-      const requested = new Set(ids);
-      let copySource = renderedCards;
-      if (editing) {
-        const updated = await cardRefs.current.get(editing)?.commit();
-        if (updated) {
-          copySource = renderedCards.map((card) => (card.id === updated.id ? updated : card));
-        }
-      }
-      const ordered = copySource.filter((card) => requested.has(card.id));
-      const text = copyBlock(ordered);
-      if (!text) {
-        notify("Select at least one card to copy.", { kind: "info" });
-        return;
-      }
       try {
+        if (returnFocus) await rememberPreviousWindow();
+        const ids = forcedIds ?? (selected.size ? [...selected] : focused ? [focused] : []);
+        const requested = new Set(ids);
+        let copySource = renderedCards;
+        if (editing) {
+          const updated = await cardRefs.current.get(editing)?.commit();
+          if (updated) {
+            copySource = renderedCards.map((card) => (card.id === updated.id ? updated : card));
+          }
+        }
+        const ordered = copySource.filter((card) => requested.has(card.id));
+        const text = copyBlock(ordered);
+        if (!text) {
+          notify("Select at least one card to copy.", { kind: "info" });
+          return;
+        }
         await copyText(text);
         let changed: string[] = [];
         if (complete) {
@@ -250,7 +269,7 @@ export default function App() {
         showError(error);
       }
     },
-    [editing, focused, renderedCards, selected],
+    [editing, focused, notify, renderedCards, selected, showError],
   );
 
   function applySettings(next: AppSettings) {
@@ -275,14 +294,14 @@ export default function App() {
     const value = composer.trim();
     if (!value) return;
     try {
-      if (/^#\s+\S/.test(value)) {
+      if (SECTION_INPUT_PATTERN.test(value)) {
         const section = await createSection(value.replace(/^#\s+/, ""));
         setSections((current) => [...current, section]);
         setSectionId(section.id);
         setComposer("");
         notify(`Created ${section.name}`, { kind: "success" });
       } else {
-        const targetSection = sectionId === "all" || sectionId === "" ? null : sectionId;
+        const targetSection = sectionId === null || sectionId === "" ? null : sectionId;
         const card = await createNote(value, targetSection);
         setCards((current) => [...current, card]);
         setComposer("");
@@ -369,6 +388,7 @@ export default function App() {
     const oldIndex = cards.findIndex((card) => card.id === active.id);
     const newIndex = cards.findIndex((card) => card.id === over.id);
     if (oldIndex < 0 || newIndex < 0) return;
+    if (cards[oldIndex].sectionId !== cards[newIndex].sectionId) return;
     const next = arrayMove(cards, oldIndex, newIndex).map((card, sortOrder) => ({
       ...card,
       sortOrder,
@@ -396,14 +416,14 @@ export default function App() {
       setCards([]);
       setSections([]);
       setSelected(new Set());
-      setSectionId("all");
+      setSectionId(null);
       setClearOpen(false);
       notify("Cairn content cleared", {
         actionLabel: "Restore",
         onAction: async () => {
           const snapshot = await restoreBackup(backupId);
-          setCards(snapshot.cards);
-          setSections(snapshot.sections);
+          setCards(snapshot.cards.sort((a, b) => a.sortOrder - b.sortOrder));
+          setSections(snapshot.sections.sort((a, b) => a.sortOrder - b.sortOrder));
         },
       });
     } catch (error) {
@@ -411,129 +431,114 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
-    function keydown(event: KeyboardEvent) {
-      if (event.defaultPrevented || settingsOpen || deleteTarget || clearOpen || moveOpen) return;
+  const handleKeydown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.defaultPrevented || settingsOpen || deleteTarget || clearOpen || moveOpen) return;
 
-      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-        return;
-      }
-      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        composerRef.current?.focus();
-        return;
-      }
-
-      if (isEditableTarget(event.target)) {
-        if (event.key === "Escape" && event.target === searchRef.current && query) {
-          event.preventDefault();
-          setQuery("");
-        }
-        return;
-      }
-
-      if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "c") {
-        event.preventDefault();
-        void copyCards(event.shiftKey, false);
-        return;
-      }
-      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "a") {
-        event.preventDefault();
-        setSelected(new Set(renderedCards.map((card) => card.id)));
-        setAnchor(renderedCards[0]?.id ?? null);
-        return;
-      }
-      if (shortcutMatches(event, settings.appShortcuts.mergeSelected)) {
-        event.preventDefault();
-        void doMerge();
-        return;
-      }
-      if (shortcutMatches(event, settings.appShortcuts.editFocused)) {
-        event.preventDefault();
-        if (focused) setEditing(focused);
-        return;
-      }
-      if (shortcutMatches(event, settings.appShortcuts.moveToSection)) {
-        event.preventDefault();
-        if (actionIds().length) setMoveOpen(true);
-        return;
-      }
-      if (event.key === "Delete") {
-        event.preventDefault();
-        const ids = actionIds();
-        if (ids.length) setDeleteTarget(ids);
-        return;
-      }
-      if (event.key === " " && !event.repeat) {
-        event.preventDefault();
-        const ids = actionIds();
-        if (ids.length) void toggleComplete(ids);
-        return;
-      }
-      if (event.key === "Enter" && focused) {
-        event.preventDefault();
-        setEditing(focused);
-        return;
-      }
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        event.preventDefault();
-        const direction = event.key === "ArrowDown" ? 1 : -1;
-        const currentIndex = Math.max(
-          0,
-          renderedCards.findIndex((card) => card.id === focused),
-        );
-        const nextIndex = Math.min(renderedCards.length - 1, Math.max(0, currentIndex + direction));
-        const next = renderedCards[nextIndex];
-        if (!next) return;
-        setFocused(next.id);
-        if (event.shiftKey) {
-          const anchorId = anchor ?? renderedCards[currentIndex]?.id ?? next.id;
-          const anchorIndex = renderedCards.findIndex((card) => card.id === anchorId);
-          const [start, end] = [anchorIndex, nextIndex].sort((a, b) => a - b);
-          setAnchor(anchorId);
-          setSelected(new Set(renderedCards.slice(start, end + 1).map((card) => card.id)));
-        } else {
-          setSelected(new Set([next.id]));
-          setAnchor(next.id);
-        }
-        requestAnimationFrame(() => {
-          const node = document.querySelector<HTMLElement>(
-            `[data-card-id="${CSS.escape(next.id)}"]`,
-          );
-          node?.focus();
-          node?.scrollIntoView({ block: "nearest" });
-        });
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (editing) setEditing(null);
-        else if (selected.size) setSelected(new Set());
-        else void hideRail();
-      }
+    if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+      return;
     }
-    window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
-  }, [
-    anchor,
-    cards,
-    clearOpen,
-    copyCards,
-    deleteTarget,
-    editing,
-    focused,
-    query,
-    selected,
-    settings.appShortcuts,
-    settingsOpen,
-    moveOpen,
-    renderedCards,
-  ]);
+    if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "n") {
+      event.preventDefault();
+      composerRef.current?.focus();
+      return;
+    }
 
-  globalActionRef.current = (event) => {
+    if (isEditableTarget(event.target)) {
+      if (event.key === "Escape" && event.target === searchRef.current && query) {
+        event.preventDefault();
+        setQuery("");
+      }
+      return;
+    }
+
+    if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "c") {
+      event.preventDefault();
+      void copyCards(event.shiftKey, false);
+      return;
+    }
+    if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      setSelected(new Set(renderedCards.map((card) => card.id)));
+      setAnchor(renderedCards[0]?.id ?? null);
+      return;
+    }
+    if (shortcutMatches(event, settings.appShortcuts.mergeSelected)) {
+      event.preventDefault();
+      void doMerge();
+      return;
+    }
+    if (shortcutMatches(event, settings.appShortcuts.editFocused)) {
+      event.preventDefault();
+      if (focused) setEditing(focused);
+      return;
+    }
+    if (shortcutMatches(event, settings.appShortcuts.moveToSection)) {
+      event.preventDefault();
+      if (actionIds().length) setMoveOpen(true);
+      return;
+    }
+    if (event.key === "Delete") {
+      event.preventDefault();
+      const ids = actionIds();
+      if (ids.length) setDeleteTarget(ids);
+      return;
+    }
+    if (event.key === " " && !event.repeat) {
+      event.preventDefault();
+      const ids = actionIds();
+      if (ids.length) void toggleComplete(ids);
+      return;
+    }
+    if (event.key === "Enter" && focused) {
+      event.preventDefault();
+      setEditing(focused);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const currentIndex = Math.max(
+        0,
+        renderedCards.findIndex((card) => card.id === focused),
+      );
+      const nextIndex = Math.min(renderedCards.length - 1, Math.max(0, currentIndex + direction));
+      const next = renderedCards[nextIndex];
+      if (!next) return;
+      setFocused(next.id);
+      if (event.shiftKey) {
+        const anchorId = anchor ?? renderedCards[currentIndex]?.id ?? next.id;
+        const anchorIndex = renderedCards.findIndex((card) => card.id === anchorId);
+        const [start, end] = [anchorIndex, nextIndex].sort((a, b) => a - b);
+        setAnchor(anchorId);
+        setSelected(new Set(renderedCards.slice(start, end + 1).map((card) => card.id)));
+      } else {
+        setSelected(new Set([next.id]));
+        setAnchor(next.id);
+      }
+      requestAnimationFrame(() => {
+        const node = document.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(next.id)}"]`);
+        node?.focus();
+        node?.scrollIntoView({ block: "nearest" });
+      });
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (editing) setEditing(null);
+      else if (selected.size) setSelected(new Set());
+      else void hideRail();
+    }
+  });
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, []);
+
+  const handleGlobalAction = useEffectEvent((event: GlobalShortcutEvent) => {
     switch (event.action) {
       case "showHide":
         void toggleRail();
@@ -570,18 +575,24 @@ export default function App() {
         void showRail(false).then(() => setClearOpen(true));
         break;
     }
-  };
+  });
 
   useEffect(() => {
+    let disposed = false;
     let unlistenShortcut: () => void = () => {};
     let unlistenFocus: () => void = () => {};
-    void onGlobalShortcut((event) => globalActionRef.current(event)).then(
-      (dispose) => (unlistenShortcut = dispose),
-    );
+    void onGlobalShortcut(handleGlobalAction).then((dispose) => {
+      if (disposed) dispose();
+      else unlistenShortcut = dispose;
+    });
     void onFocusNewCard(() => requestAnimationFrame(() => composerRef.current?.focus())).then(
-      (dispose) => (unlistenFocus = dispose),
+      (dispose) => {
+        if (disposed) dispose();
+        else unlistenFocus = dispose;
+      },
     );
     return () => {
+      disposed = true;
       unlistenShortcut();
       unlistenFocus();
     };
@@ -606,7 +617,7 @@ export default function App() {
   }
 
   const activeSectionName =
-    sectionId === "all" || sectionId === ""
+    sectionId === null || sectionId === ""
       ? undefined
       : sections.find((section) => section.id === sectionId)?.name;
 
@@ -631,6 +642,7 @@ export default function App() {
           setSettingsOpen(true);
         }}
         onClear={() => setClearOpen(true)}
+        onQuit={() => void quitApp().catch(showError)}
       />
 
       <section
@@ -687,6 +699,7 @@ export default function App() {
                               transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
                             >
                               <CardItem
+                                key={card.updatedAt}
                                 ref={(handle) => {
                                   if (handle) cardRefs.current.set(card.id, handle);
                                   else cardRefs.current.delete(card.id);
@@ -751,7 +764,7 @@ export default function App() {
         sectionName={activeSectionName}
       />
 
-      <ToastRegion toast={toast} dismiss={() => setToast(null)} />
+      <ToastRegion toast={toast} dismiss={() => setToast(null)} onActionError={showError} />
       {settingsOpen ? (
         <Suspense fallback={null}>
           <SettingsDialog

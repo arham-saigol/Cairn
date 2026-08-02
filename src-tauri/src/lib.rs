@@ -119,18 +119,23 @@ fn capture_selection(state: State<'_, AppState>) -> Result<Card, String> {
         .create_note(&text, None, source.process, source.title)
 }
 
+fn reveal_rail(app: &tauri::AppHandle, state: &AppState) -> Result<(), String> {
+    let window = main_window(app)?;
+    let cairn_hwnd = window_hwnd(&window).ok();
+    let anchor = state.previous_window.remember(cairn_hwnd);
+    position_rail(&window, anchor)?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn show_rail(
     focus_input: bool,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let window = main_window(&app)?;
-    let cairn_hwnd = window_hwnd(&window).ok();
-    let anchor = state.previous_window.remember(cairn_hwnd);
-    position_rail(&window, anchor)?;
-    window.show().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())?;
+    reveal_rail(&app, &state)?;
     if focus_input {
         app.emit("focus-new-card", ())
             .map_err(|error| error.to_string())?;
@@ -145,12 +150,7 @@ fn toggle_rail(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), 
         window.hide().map_err(|error| error.to_string())?;
         return Ok(());
     }
-    let cairn_hwnd = window_hwnd(&window).ok();
-    let anchor = state.previous_window.remember(cairn_hwnd);
-    position_rail(&window, anchor)?;
-    window.show().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())?;
-    Ok(())
+    reveal_rail(&app, &state)
 }
 
 #[tauri::command]
@@ -174,8 +174,23 @@ fn restore_previous_window(
 }
 
 #[tauri::command]
+fn remember_previous_window(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let window = main_window(&app)?;
+    state.previous_window.remember(window_hwnd(&window).ok());
+    Ok(())
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 fn toggle_always_on_top(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
-    let mut settings = state.database.bootstrap()?.settings;
+    let mut settings = state.database.load_settings()?;
     settings.always_on_top = !settings.always_on_top;
     main_window(&app)?
         .set_always_on_top(settings.always_on_top)
@@ -237,6 +252,8 @@ pub fn run() {
             toggle_rail,
             hide_rail,
             restore_previous_window,
+            remember_previous_window,
+            quit_app,
             toggle_always_on_top,
         ])
         .on_window_event(|window, event| {

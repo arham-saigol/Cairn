@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import { CheckCircle2, Info, X } from "lucide-react";
+import { useState } from "react";
 import { Button } from "./ui/button";
 
 export interface ToastState {
@@ -10,7 +11,49 @@ export interface ToastState {
   kind?: "success" | "info";
 }
 
-export function ToastRegion({ toast, dismiss }: { toast: ToastState | null; dismiss: () => void }) {
+function ToastAction({
+  toast,
+  dismiss,
+  onError,
+}: {
+  toast: ToastState;
+  dismiss: () => void;
+  onError: (error: unknown) => void;
+}) {
+  const [pending, setPending] = useState(false);
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="-my-1 h-7 px-2 text-[var(--accent)]"
+      disabled={pending}
+      onClick={async () => {
+        setPending(true);
+        let failure: unknown;
+        try {
+          await toast.onAction?.();
+        } catch (error) {
+          failure = error;
+        } finally {
+          dismiss();
+          if (failure !== undefined) onError(failure);
+        }
+      }}
+    >
+      {toast.actionLabel}
+    </Button>
+  );
+}
+
+export function ToastRegion({
+  toast,
+  dismiss,
+  onActionError,
+}: {
+  toast: ToastState | null;
+  dismiss: () => void;
+  onActionError?: (error: unknown) => void;
+}) {
   return (
     <div
       className="pointer-events-none absolute inset-x-0 bottom-[92px] z-[90] flex justify-center px-5"
@@ -34,17 +77,12 @@ export function ToastRegion({ toast, dismiss }: { toast: ToastState | null; dism
             )}
             <span>{toast.message}</span>
             {toast.actionLabel ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="-my-1 h-7 px-2 text-[var(--accent)]"
-                onClick={async () => {
-                  await toast.onAction?.();
-                  dismiss();
-                }}
-              >
-                {toast.actionLabel}
-              </Button>
+              <ToastAction
+                key={toast.id}
+                toast={toast}
+                dismiss={dismiss}
+                onError={onActionError ?? (() => undefined)}
+              />
             ) : null}
             <button
               className="-mr-1 rounded-md p-1 text-[var(--subtle)] hover:text-[var(--text)]"

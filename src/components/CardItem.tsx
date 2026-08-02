@@ -70,7 +70,6 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
     id: card.id,
   });
 
-  useEffect(() => setDraft(card.content), [card.content]);
   useEffect(() => {
     if (editing) {
       editorRef.current?.focus();
@@ -172,7 +171,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
             className="mt-1.5 truncate text-[10px] text-[var(--subtle)]"
             title={`${source} · ${new Date(card.createdAt).toLocaleString()}`}
           >
-            {card.sourceProcess} · {formatCapturedAt(card.createdAt)}
+            {source} · {formatCapturedAt(card.createdAt)}
           </p>
         ) : null}
       </div>

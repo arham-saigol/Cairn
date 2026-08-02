@@ -2,12 +2,11 @@ import { shortcutTokens } from "../../lib/keybindings";
 import { cn } from "../../lib/utils";
 
 export function Shortcut({ value, className }: { value: string | null; className?: string }) {
-  const doubleTap = value?.startsWith("DoubleTap:");
+  const doubleTapModifier = value?.startsWith("DoubleTap:") ? value.slice(10) : null;
+  const doubleTap = Boolean(doubleTapModifier);
+  const label = doubleTapModifier ? `Double-tap ${doubleTapModifier}` : (value ?? "Not set");
   return (
-    <span
-      className={cn("inline-flex items-center gap-1", className)}
-      aria-label={value ?? "Not set"}
-    >
+    <span className={cn("inline-flex items-center gap-1", className)} aria-label={label}>
       {shortcutTokens(value).map((token, index) => (
         <span key={`${token}-${index}`} className="inline-flex items-center gap-1">
           {doubleTap && index === 1 ? (

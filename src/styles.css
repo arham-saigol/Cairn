@@ -4,7 +4,7 @@
   color-scheme: light;
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   font-synthesis: none;
-  text-rendering: geometricPrecision;
+  text-rendering: geometricprecision;
   --panel-opacity: 94%;
   --panel-base: #e9ebee;
   --panel-solid: #eef0f2;
@@ -138,6 +138,7 @@ textarea {
 
 [data-tauri-drag-region] button,
 [data-tauri-drag-region] input,
+[data-tauri-drag-region] textarea,
 [data-tauri-drag-region] [role="button"] {
   -webkit-app-region: no-drag;
 }
@@ -175,14 +176,20 @@ textarea {
   animation: fade-out 110ms ease-in;
 }
 
-.dialog-content[data-state="open"],
-.settings-panel[data-state="open"] {
+.dialog-content[data-state="open"] {
   animation: dialog-in 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.dialog-content[data-state="closed"],
-.settings-panel[data-state="closed"] {
+.dialog-content[data-state="closed"] {
   animation: dialog-out 120ms ease-in;
+}
+
+.settings-panel[data-state="open"] {
+  animation: panel-in 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.settings-panel[data-state="closed"] {
+  animation: panel-out 120ms ease-in;
 }
 
 @keyframes menu-in {
@@ -211,14 +218,6 @@ textarea {
     opacity: 0;
     transform: translate(-50%, -49%) scale(0.985);
   }
-}
-
-.settings-panel[data-state="open"] {
-  animation-name: panel-in;
-}
-
-.settings-panel[data-state="closed"] {
-  animation-name: panel-out;
 }
 
 @keyframes panel-in {
