@@ -2,7 +2,7 @@ use crate::models::{AppSettings, Card, ContentBackup, Section, Snapshot};
 use chrono::{SecondsFormat, Utc};
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 use uuid::Uuid;
 
 pub struct Database {
@@ -349,12 +349,6 @@ impl Database {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
-        transaction
-            .execute("DELETE FROM cards", [])
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute("DELETE FROM sections", [])
-            .map_err(|error| error.to_string())?;
         restore_content(&transaction, &backup)?;
         transaction.commit().map_err(|error| error.to_string())?;
         drop(connection);
@@ -388,21 +382,65 @@ fn insert_card(connection: &Connection, card: &Card) -> Result<(), String> {
 }
 
 fn restore_content(transaction: &Transaction<'_>, backup: &ContentBackup) -> Result<(), String> {
+    let mut section_ids = HashMap::new();
+    let mut next_section_order: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM sections",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
     for section in &backup.sections {
-        transaction
-            .execute(
-                "INSERT INTO sections(id, name, sort_order, created_at) VALUES(?1, ?2, ?3, ?4)",
-                params![
-                    section.id,
-                    section.name,
-                    section.sort_order,
-                    section.created_at
-                ],
+        let existing_id: Option<String> = transaction
+            .query_row(
+                "SELECT id FROM sections WHERE name = ?1",
+                [&section.name],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let target_id = if let Some(existing_id) = existing_id {
+            existing_id
+        } else {
+            let inserted = transaction
+                .execute(
+                    "INSERT OR IGNORE INTO sections(id, name, sort_order, created_at) VALUES(?1, ?2, ?3, ?4)",
+                    params![section.id, section.name, next_section_order, section.created_at],
+                )
+                .map_err(|error| error.to_string())?;
+            if inserted > 0 {
+                next_section_order += 1;
+            }
+            section.id.clone()
+        };
+        section_ids.insert(section.id.clone(), target_id);
+    }
+
+    let mut next_card_order: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM cards",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    for card in &backup.cards {
+        let mut restored = card.clone();
+        restored.section_id = card
+            .section_id
+            .as_ref()
+            .and_then(|id| section_ids.get(id).cloned());
+        restored.sort_order = next_card_order;
+        let already_present: i64 = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM cards WHERE id = ?1)",
+                [&restored.id],
+                |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-    }
-    for card in &backup.cards {
-        insert_card(transaction, card)?;
+        if already_present == 0 {
+            insert_card(transaction, &restored)?;
+            next_card_order += 1;
+        }
     }
     Ok(())
 }
@@ -514,5 +552,21 @@ mod tests {
         assert!(db.bootstrap().unwrap().cards.is_empty());
         let restored = db.restore_backup(&backup).unwrap();
         assert_eq!(restored.cards[0].content, "Keep me");
+    }
+
+    #[test]
+    fn restore_preserves_cards_created_after_clear() {
+        let db = database();
+        db.create_note("Before clear", None, None, None).unwrap();
+        let backup = db.clear_all().unwrap();
+        db.create_note("After clear", None, None, None).unwrap();
+
+        let restored = db.restore_backup(&backup).unwrap();
+        let contents: Vec<_> = restored
+            .cards
+            .iter()
+            .map(|card| card.content.as_str())
+            .collect();
+        assert_eq!(contents, ["After clear", "Before clear"]);
     }
 }

@@ -45,7 +45,9 @@ impl ShortcutService {
             .name("cairn-shortcuts".into())
             .spawn(move || shortcut_loop(app, receiver))
             .map_err(|error| error.to_string())?;
-        service.configure(&settings.global_shortcuts)?;
+        if let Err(error) = service.configure(&settings.global_shortcuts) {
+            eprintln!("Global shortcuts are disabled until they are reconfigured: {error}");
+        }
         Ok(service)
     }
 

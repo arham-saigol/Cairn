@@ -188,6 +188,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
+                let cairn_hwnd = window_hwnd(&window).ok();
+                if let Some(state) = app.try_state::<AppState>() {
+                    let anchor = state.previous_window.remember(cairn_hwnd);
+                    let _ = position_rail(&window, anchor);
+                }
                 let _ = window.show();
                 let _ = window.set_focus();
             }

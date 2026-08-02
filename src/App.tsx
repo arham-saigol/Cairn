@@ -200,7 +200,10 @@ export default function App() {
   const copyCards = useCallback(
     async (complete: boolean, returnFocus: boolean, forcedIds?: string[]) => {
       const ids = forcedIds ?? (selected.size ? [...selected] : focused ? [focused] : []);
-      const ordered = cards.filter((card) => ids.includes(card.id));
+      const requested = new Set(ids);
+      const ordered = groups.flatMap((group) =>
+        group.cards.filter((card) => requested.has(card.id)),
+      );
       const text = copyBlock(ordered);
       if (!text) {
         notify("Select at least one card to copy.", { kind: "info" });
@@ -235,7 +238,7 @@ export default function App() {
         showError(error);
       }
     },
-    [cards, focused, selected],
+    [focused, groups, selected],
   );
 
   function applySettings(next: AppSettings) {
