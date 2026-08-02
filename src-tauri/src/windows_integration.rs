@@ -348,16 +348,19 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
             }
         };
         if let Err(error) = wait_for_modifiers_release() {
+            drop(original);
             OleUninitialize();
             return Err(error);
         }
         if GetForegroundWindow() != expected_foreground {
+            drop(original);
             OleUninitialize();
             return Err(not_found());
         }
         let sequence = GetClipboardSequenceNumber();
         if let Err(error) = send_ctrl_c() {
             let restored = restore_clipboard();
+            drop(original);
             OleUninitialize();
             restored?;
             return Err(error);
@@ -377,6 +380,7 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
         };
 
         let restored = restore_clipboard();
+        drop(original);
         OleUninitialize();
         restored?;
         captured
@@ -415,6 +419,7 @@ pub fn write_clipboard_text(text: &str, owner: HWND) -> Result<(), String> {
         let memory = match GlobalAlloc(GMEM_MOVEABLE, bytes) {
             Ok(memory) => memory,
             Err(error) => {
+                drop(original);
                 OleUninitialize();
                 return Err(error.to_string());
             }
@@ -422,6 +427,7 @@ pub fn write_clipboard_text(text: &str, owner: HWND) -> Result<(), String> {
         let target = GlobalLock(memory) as *mut u16;
         if target.is_null() {
             let _ = GlobalFree(Some(memory));
+            drop(original);
             OleUninitialize();
             return Err("Windows could not allocate clipboard memory.".into());
         }
@@ -429,12 +435,14 @@ pub fn write_clipboard_text(text: &str, owner: HWND) -> Result<(), String> {
         let _ = GlobalUnlock(memory);
         if let Err(error) = open_clipboard_retry(Some(owner)) {
             let _ = GlobalFree(Some(memory));
+            drop(original);
             OleUninitialize();
             return Err(error);
         }
         if let Err(error) = EmptyClipboard() {
             let _ = GlobalFree(Some(memory));
             let _ = CloseClipboard();
+            drop(original);
             OleUninitialize();
             return Err(error.to_string());
         }
@@ -448,10 +456,12 @@ pub fn write_clipboard_text(text: &str, owner: HWND) -> Result<(), String> {
             } else {
                 Err("Windows could not restore the original clipboard contents.".to_string())
             };
+            drop(original);
             OleUninitialize();
             restored?;
             return Err(error.to_string());
         }
+        drop(original);
         OleUninitialize();
         Ok(())
     }
