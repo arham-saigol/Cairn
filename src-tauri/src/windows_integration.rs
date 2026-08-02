@@ -386,6 +386,11 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
         while Instant::now() < deadline && GetClipboardSequenceNumber() == sequence {
             thread::sleep(Duration::from_millis(15));
         }
+        if GetForegroundWindow() != expected_foreground {
+            drop(original);
+            OleUninitialize();
+            return Err("The foreground application changed during capture.".into());
+        }
         let changed = GetClipboardSequenceNumber() != sequence;
         let captured = if changed {
             // Give delayed-rendering clipboard owners a short moment after the sequence changes.

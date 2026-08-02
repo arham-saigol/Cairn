@@ -90,6 +90,9 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<string[] | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [lastBackupId, setLastBackupId] = useState<string | null>(() =>
+    localStorage.getItem("cairn:last-clear-backup"),
+  );
   const [toast, setToast] = useState<ToastState | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -543,17 +546,27 @@ export default function App() {
       setSelected(new Set());
       setSectionId(null);
       setClearOpen(false);
+      localStorage.setItem("cairn:last-clear-backup", backupId);
+      setLastBackupId(backupId);
       notify("Cairn content cleared", {
         actionLabel: "Restore",
-        onAction: async () => {
-          const snapshot = await trackMutation(restoreBackup(backupId));
-          setCards(snapshot.cards.sort((a, b) => a.sortOrder - b.sortOrder));
-          setSections(snapshot.sections.sort((a, b) => a.sortOrder - b.sortOrder));
-        },
+        onAction: () => restoreClearBackup(backupId),
       });
     } catch (error) {
       showError(error);
     }
+  }
+
+  async function restoreClearBackup(backupId: string) {
+    const snapshot = await trackMutation(restoreBackup(backupId));
+    setCards(snapshot.cards.sort((a, b) => a.sortOrder - b.sortOrder));
+    setSections(snapshot.sections.sort((a, b) => a.sortOrder - b.sortOrder));
+    setLastBackupId((current) => {
+      if (current !== backupId) return current;
+      localStorage.removeItem("cairn:last-clear-backup");
+      return null;
+    });
+    notify("Last clear restored", { kind: "success" });
   }
 
   async function confirmClear() {
@@ -803,6 +816,9 @@ export default function App() {
           setSettingsOpen(true);
         }}
         onClear={() => setClearOpen(true)}
+        onRestoreLastClear={
+          lastBackupId ? () => void restoreClearBackup(lastBackupId).catch(showError) : undefined
+        }
         onQuit={() => void quit()}
       />
 

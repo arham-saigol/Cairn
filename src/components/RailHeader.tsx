@@ -7,6 +7,7 @@ import {
   Search,
   Trash2,
   Power,
+  RotateCcw,
   X,
   Keyboard,
 } from "lucide-react";
@@ -23,6 +24,7 @@ interface RailHeaderProps {
   onAppearance: () => void;
   onKeybindings: () => void;
   onClear: () => void;
+  onRestoreLastClear?: () => void;
   onQuit: () => void;
 }
 
@@ -39,6 +41,7 @@ export function RailHeader({
   onAppearance,
   onKeybindings,
   onClear,
+  onRestoreLastClear,
   onQuit,
 }: RailHeaderProps) {
   const currentSection = sections.find((section) => section.id === sectionId);
@@ -143,6 +146,11 @@ export function RailHeader({
               >
                 <Trash2 className="size-4" /> Clear
               </DropdownMenu.Item>
+              {onRestoreLastClear ? (
+                <DropdownMenu.Item className={menuItem} onSelect={onRestoreLastClear}>
+                  <RotateCcw className="size-4 text-[var(--subtle)]" /> Restore last clear
+                </DropdownMenu.Item>
+              ) : null}
               <DropdownMenu.Item className={menuItem} onSelect={onQuit}>
                 <Power className="size-4 text-[var(--subtle)]" /> Quit Cairn
               </DropdownMenu.Item>
