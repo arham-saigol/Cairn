@@ -152,6 +152,23 @@ const FIXED_VALUES = new Set(
     (shortcut) => !shortcut.includes("keys") && !shortcut.includes("Arrow"),
   ),
 );
+const GLOBAL_NAMED_KEYS = new Set([
+  "Space",
+  "Enter",
+  "Tab",
+  "Escape",
+  "Delete",
+  "Up",
+  "Down",
+  "Left",
+  "Right",
+  ".",
+  ",",
+]);
+
+function isSupportedGlobalKey(key: string) {
+  return /^[A-Z0-9]$/.test(key) || /^F([1-9]|1\d|2[0-4])$/.test(key) || GLOBAL_NAMED_KEYS.has(key);
+}
 
 export function validateShortcut(
   value: string,
@@ -176,6 +193,9 @@ export function validateShortcut(
     if (!key) return "Add a non-modifier key, or double-tap a modifier.";
     if (scope === "global" && modifiers.length === 0 && !/^F([1-9]|1\d|2[0-4])$/.test(key)) {
       return UNSAFE_GLOBAL_SHORTCUT_MESSAGE;
+    }
+    if (scope === "global" && !isSupportedGlobalKey(key)) {
+      return `${key} is not supported as a global shortcut key.`;
     }
     if (FIXED_VALUES.has(normalized)) {
       return "That shortcut is reserved for standard Cairn editing behavior.";

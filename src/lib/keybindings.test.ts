@@ -61,4 +61,10 @@ describe("keybinding validation", () => {
       "Press a key or key combination.",
     );
   });
+
+  it("rejects global keys unsupported by the native registrar", () => {
+    expect(validateShortcut("Ctrl+Alt+Home", "global", "clearAll", DEFAULT_SETTINGS)).toBe(
+      "Home is not supported as a global shortcut key.",
+    );
+  });
 });
