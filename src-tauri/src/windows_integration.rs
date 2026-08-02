@@ -58,6 +58,7 @@ const MIN_RAIL_HEIGHT: i32 = 480;
 const UIA_TIMEOUT: Duration = Duration::from_millis(1500);
 static UIA_WORKER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CLIPBOARD_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static SELECTION_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 const UIA_BUSY_ERROR: &str = "A previous UI Automation capture is still running.";
 
 struct UiaWorkerGuard;
@@ -73,6 +74,14 @@ struct ClipboardCaptureGuard;
 impl Drop for ClipboardCaptureGuard {
     fn drop(&mut self) {
         CLIPBOARD_CAPTURE_ACTIVE.store(false, Ordering::Release);
+    }
+}
+
+struct SelectionCaptureGuard;
+
+impl Drop for SelectionCaptureGuard {
+    fn drop(&mut self) {
+        SELECTION_CAPTURE_ACTIVE.store(false, Ordering::Release);
     }
 }
 
@@ -204,6 +213,10 @@ pub fn position_rail(window: &WebviewWindow, anchor: Option<HWND>) -> Result<(),
 }
 
 pub fn selected_text() -> Result<(String, SourceContext), String> {
+    if SELECTION_CAPTURE_ACTIVE.swap(true, Ordering::AcqRel) {
+        return Err("A selection capture is already in progress.".into());
+    }
+    let _capture_guard = SelectionCaptureGuard;
     let context = foreground_context();
     if context.hwnd.0.is_null() {
         return Err("No foreground application is available.".into());

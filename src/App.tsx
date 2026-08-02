@@ -250,7 +250,7 @@ export default function App() {
     return tracked;
   }
 
-  const copyCards = useCallback(
+  const performCopyCards = useCallback(
     async (complete: boolean, returnFocus: boolean, forcedIds?: string[]) => {
       try {
         if (returnFocus) await rememberPreviousWindow();
@@ -299,6 +299,10 @@ export default function App() {
     },
     [editing, focused, notify, renderedCards, selected, showError],
   );
+
+  function copyCards(complete: boolean, returnFocus: boolean, forcedIds?: string[]) {
+    return trackMutation(performCopyCards(complete, returnFocus, forcedIds));
+  }
 
   function applySettings(next: AppSettings) {
     if (pendingAlwaysOnTop.current) {
@@ -349,8 +353,10 @@ export default function App() {
         completionQueue.current,
         composerSubmission.current ?? Promise.resolve(),
         clearMutation.current ?? Promise.resolve(),
-        Promise.all([...pendingMutations.current]),
       ]);
+      while (pendingMutations.current.size) {
+        await Promise.all([...pendingMutations.current]);
+      }
       await quitApp();
     } catch (error) {
       quitting.current = false;
