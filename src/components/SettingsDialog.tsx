@@ -99,7 +99,7 @@ function ShortcutRecorder({
   onClose: () => void;
   onSave: (value: string) => void;
   onUnset: () => void;
-  onReset: () => void;
+  onReset: () => string | null;
 }) {
   const [candidate, setCandidate] = useState<string | null>(null);
   const [pressed, setPressed] = useState<string[]>([]);
@@ -217,7 +217,14 @@ function ShortcutRecorder({
           )}
 
           <div className="mt-5 flex flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={onReset}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const resetError = onReset();
+                if (resetError) setError(resetError);
+              }}
+            >
               Reset
             </Button>
             <Button variant="ghost" size="sm" onClick={onUnset}>
@@ -574,7 +581,15 @@ export function SettingsDialog({
         onClose={() => setRecorder(null)}
         onSave={saveRecorder}
         onUnset={() => saveRecorder(null)}
-        onReset={() => saveRecorder(recorderDefault)}
+        onReset={() => {
+          if (!recorder) return null;
+          if (recorderDefault) {
+            const error = validateShortcut(recorderDefault, recorder.scope, recorder.id, settings);
+            if (error) return error;
+          }
+          saveRecorder(recorderDefault);
+          return null;
+        }}
       />
     </>
   );

@@ -94,6 +94,7 @@ export default function App() {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const toastId = useRef(0);
   const cardRefs = useRef(new Map<string, CardItemHandle>());
+  const composerSubmitting = useRef(false);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
 
@@ -290,9 +291,11 @@ export default function App() {
   }
 
   async function submitComposer() {
+    if (composerSubmitting.current) return;
     const submittedDraft = composer;
     const value = submittedDraft.trim();
     if (!value) return;
+    composerSubmitting.current = true;
     try {
       if (SECTION_INPUT_PATTERN.test(value)) {
         const section = await createSection(value.replace(/^#\s+/, ""));
@@ -312,6 +315,8 @@ export default function App() {
       }
     } catch (error) {
       showError(error);
+    } finally {
+      composerSubmitting.current = false;
     }
   }
 
@@ -540,6 +545,7 @@ export default function App() {
   }, []);
 
   const handleGlobalAction = useEffectEvent((event: GlobalShortcutEvent) => {
+    if (settingsOpen) return;
     switch (event.action) {
       case "showHide":
         void toggleRail();
