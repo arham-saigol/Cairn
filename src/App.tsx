@@ -235,20 +235,25 @@ export default function App() {
     return focused ? [focused] : [];
   }
 
-  function queueCompletionUpdate(ids: string[], completed: boolean) {
-    const operation = completionQueue.current.then(() => setCardsCompleted(ids, completed));
-    completionQueue.current = operation.then(
-      () => undefined,
-      () => undefined,
-    );
-    return operation;
-  }
-
-  function trackMutation<T>(operation: Promise<T>): Promise<T> {
+  const trackMutation = useCallback(<T,>(operation: Promise<T>): Promise<T> => {
     const tracked = operation.finally(() => pendingMutations.current.delete(tracked));
     pendingMutations.current.add(tracked);
     return tracked;
-  }
+  }, []);
+
+  const queueCompletionUpdate = useCallback(
+    (ids: string[], completed: boolean) => {
+      const operation = trackMutation(
+        completionQueue.current.then(() => setCardsCompleted(ids, completed)),
+      );
+      completionQueue.current = operation.then(
+        () => undefined,
+        () => undefined,
+      );
+      return operation;
+    },
+    [trackMutation],
+  );
 
   const performCopyCards = useCallback(
     async (complete: boolean, returnFocus: boolean, forcedIds?: string[]) => {
@@ -297,7 +302,7 @@ export default function App() {
         showError(error);
       }
     },
-    [editing, focused, notify, renderedCards, selected, showError],
+    [editing, focused, notify, queueCompletionUpdate, renderedCards, selected, showError],
   );
 
   function copyCards(complete: boolean, returnFocus: boolean, forcedIds?: string[]) {
@@ -392,7 +397,7 @@ export default function App() {
 
   async function submitComposer() {
     if (composerSubmission.current) return composerSubmission.current;
-    const operation = submitComposerDraft();
+    const operation = trackMutation(submitComposerDraft());
     composerSubmission.current = operation;
     try {
       await operation;
@@ -431,22 +436,24 @@ export default function App() {
     );
     const sequence = ++completionSequence.current;
     ids.forEach((id) => pendingCompletion.current.set(id, { completed, sequence }));
-    completionQueue.current = completionQueue.current.then(async () => {
-      try {
-        const changed = await setCardsCompleted(ids, completed);
-        setCards((current) =>
-          current.map((card) => (changed.includes(card.id) ? { ...card, completed } : card)),
-        );
-      } catch (error) {
-        showError(error);
-      } finally {
-        ids.forEach((id) => {
-          if (pendingCompletion.current.get(id)?.sequence === sequence) {
-            pendingCompletion.current.delete(id);
-          }
-        });
-      }
-    });
+    completionQueue.current = trackMutation(
+      completionQueue.current.then(async () => {
+        try {
+          const changed = await setCardsCompleted(ids, completed);
+          setCards((current) =>
+            current.map((card) => (changed.includes(card.id) ? { ...card, completed } : card)),
+          );
+        } catch (error) {
+          showError(error);
+        } finally {
+          ids.forEach((id) => {
+            if (pendingCompletion.current.get(id)?.sequence === sequence) {
+              pendingCompletion.current.delete(id);
+            }
+          });
+        }
+      }),
+    );
     return completionQueue.current;
   }
 
@@ -713,7 +720,7 @@ export default function App() {
               showError(error);
               try {
                 const snapshot = await bootstrap();
-                setSettings(snapshot.settings);
+                if (sequence === settingsSaveSequence.current) setSettings(snapshot.settings);
               } catch {
                 // Keep the latest in-memory settings if the database cannot be reloaded.
               }
