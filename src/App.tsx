@@ -796,6 +796,9 @@ export default function App() {
                       <AnimatePresence initial={false}>
                         {group.cards.map((card) => {
                           const ids = actionIds(card.id);
+                          const completionTarget = !cards
+                            .filter((item) => ids.includes(item.id))
+                            .every((item) => item.completed);
                           return (
                             <motion.div
                               key={card.id}
@@ -816,6 +819,7 @@ export default function App() {
                                 selected={selected.has(card.id)}
                                 focused={focused === card.id}
                                 selectedCount={selected.size}
+                                completionTarget={completionTarget}
                                 editing={editing === card.id}
                                 onSelect={(event) => selectCard(card.id, event)}
                                 onFocus={() => setFocused(card.id)}

@@ -23,6 +23,7 @@ interface CardItemProps {
   selected: boolean;
   focused: boolean;
   selectedCount: number;
+  completionTarget: boolean;
   editing: boolean;
   onSelect: (event: React.MouseEvent) => void;
   onFocus: () => void;
@@ -51,6 +52,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
     selected,
     focused,
     selectedCount,
+    completionTarget,
     editing,
     onSelect,
     onFocus,
@@ -150,7 +152,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
             ? "border-[var(--accent)] bg-[var(--accent)] text-white"
             : "border-[var(--check-border)] text-transparent hover:border-[var(--accent)]",
         )}
-        aria-label={card.completed ? "Mark card incomplete" : "Mark card complete"}
+        aria-label={completionTarget ? "Mark as done" : "Mark as open"}
         aria-pressed={card.completed}
         onClick={(event) => {
           event.stopPropagation();
@@ -241,7 +243,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
                 </DropdownMenu.Item>
                 <DropdownMenu.Item className={itemClass} onSelect={onToggleCompleted}>
                   <CheckCircle2 className="size-4 text-[var(--subtle)]" />
-                  {card.completed ? "Mark as open" : "Mark as done"}
+                  {completionTarget ? "Mark as done" : "Mark as open"}
                 </DropdownMenu.Item>
                 <DropdownMenu.Separator className="my-1 h-px bg-[var(--border-soft)]" />
                 <DropdownMenu.Item className={itemClass} onSelect={onBeginEdit}>
