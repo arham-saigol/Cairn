@@ -137,6 +137,12 @@ function ShortcutRecorder({
             onClose();
           }}
           onKeyDown={(event) => {
+            if (
+              (event.target as HTMLElement).closest(
+                "button, a, input, select, textarea, [role='button'], [contenteditable='true']",
+              )
+            )
+              return;
             if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) return;
             event.preventDefault();
             event.stopPropagation();
@@ -153,6 +159,12 @@ function ShortcutRecorder({
             if (value) propose(value);
           }}
           onKeyUp={(event) => {
+            if (
+              (event.target as HTMLElement).closest(
+                "button, a, input, select, textarea, [role='button'], [contenteditable='true']",
+              )
+            )
+              return;
             if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) return;
             event.preventDefault();
             event.stopPropagation();
