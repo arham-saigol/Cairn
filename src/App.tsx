@@ -101,6 +101,7 @@ export default function App() {
   const completionSequence = useRef(0);
   const pendingCompletion = useRef(new Map<string, { completed: boolean; sequence: number }>());
   const clearMutation = useRef<Promise<void> | null>(null);
+  const pendingMutations = useRef(new Set<Promise<unknown>>());
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
   const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -243,6 +244,12 @@ export default function App() {
     return operation;
   }
 
+  function trackMutation<T>(operation: Promise<T>): Promise<T> {
+    const tracked = operation.finally(() => pendingMutations.current.delete(tracked));
+    pendingMutations.current.add(tracked);
+    return tracked;
+  }
+
   const copyCards = useCallback(
     async (complete: boolean, returnFocus: boolean, forcedIds?: string[]) => {
       try {
@@ -342,6 +349,7 @@ export default function App() {
         completionQueue.current,
         composerSubmission.current ?? Promise.resolve(),
         clearMutation.current ?? Promise.resolve(),
+        Promise.all([...pendingMutations.current]),
       ]);
       await quitApp();
     } catch (error) {
@@ -440,7 +448,7 @@ export default function App() {
     const ids = actionIds();
     if (ids.length < 2) return notify("Select two or more cards to merge.", { kind: "info" });
     try {
-      const merged = await mergeCards(ids);
+      const merged = await trackMutation(mergeCards(ids));
       setCards((current) =>
         [...current.filter((card) => !ids.includes(card.id)), merged].sort(
           (a, b) => a.sortOrder - b.sortOrder,
@@ -457,7 +465,7 @@ export default function App() {
 
   async function doMove(ids: string[], target: string | null) {
     try {
-      await moveCards(ids, target);
+      await trackMutation(moveCards(ids, target));
       setCards((current) =>
         current.map((card) => (ids.includes(card.id) ? { ...card, sectionId: target } : card)),
       );
@@ -480,7 +488,7 @@ export default function App() {
     }));
     const order = new Map(next.map((card) => [card.id, card.sortOrder]));
     setCards(next);
-    void reorderCards(next.map((card) => card.id))
+    void trackMutation(reorderCards(next.map((card) => card.id)))
       .then(() => {
         setCards((current) =>
           current
@@ -504,7 +512,7 @@ export default function App() {
   async function confirmDelete() {
     if (!deleteTarget?.length) return;
     try {
-      await deleteCards(deleteTarget);
+      await trackMutation(deleteCards(deleteTarget));
       setCards((current) => current.filter((card) => !deleteTarget.includes(card.id)));
       setSelected(new Set());
       setDeleteTarget(null);
@@ -516,7 +524,7 @@ export default function App() {
 
   async function clearContent() {
     try {
-      const backupId = await clearAll();
+      const backupId = await trackMutation(clearAll());
       setCards([]);
       setSections([]);
       setSelected(new Set());
@@ -525,7 +533,7 @@ export default function App() {
       notify("Cairn content cleared", {
         actionLabel: "Restore",
         onAction: async () => {
-          const snapshot = await restoreBackup(backupId);
+          const snapshot = await trackMutation(restoreBackup(backupId));
           setCards(snapshot.cards.sort((a, b) => a.sortOrder - b.sortOrder));
           setSections(snapshot.sections.sort((a, b) => a.sortOrder - b.sortOrder));
         },
