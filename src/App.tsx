@@ -290,20 +290,21 @@ export default function App() {
   }
 
   async function submitComposer() {
-    const value = composer.trim();
+    const submittedDraft = composer;
+    const value = submittedDraft.trim();
     if (!value) return;
     try {
       if (SECTION_INPUT_PATTERN.test(value)) {
         const section = await createSection(value.replace(/^#\s+/, ""));
         setSections((current) => [...current, section]);
         setSectionId(section.id);
-        setComposer("");
+        setComposer((current) => (current === submittedDraft ? "" : current));
         notify(`Created ${section.name}`, { kind: "success" });
       } else {
         const targetSection = sectionId === null || sectionId === "" ? null : sectionId;
         const card = await createNote(value, targetSection);
         setCards((current) => [...current, card]);
-        setComposer("");
+        setComposer((current) => (current === submittedDraft ? "" : current));
         setSelected(new Set([card.id]));
         setAnchor(card.id);
         setFocused(card.id);
