@@ -21,8 +21,9 @@ use windows::Win32::{
         WindowsAndMessaging::{
             CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW,
             SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT,
-            MSG, PM_NOREMOVE, PM_REMOVE, WH_KEYBOARD_LL, WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
-            WM_SYSKEYDOWN, WM_SYSKEYUP,
+            MSG, PM_NOREMOVE, PM_REMOVE, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_HOTKEY,
+            WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN,
+            WM_SYSKEYUP, WM_XBUTTONDOWN,
         },
     },
 };
@@ -148,6 +149,26 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     CallNextHookEx(None, code, wparam, lparam)
 }
 
+unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32
+        && [
+            WM_LBUTTONDOWN,
+            WM_RBUTTONDOWN,
+            WM_MBUTTONDOWN,
+            WM_XBUTTONDOWN,
+        ]
+        .contains(&(wparam.0 as u32))
+    {
+        if let Some(state) = TAP_STATE.get() {
+            let mut state = state.lock();
+            let pressed = state.pressed.iter().copied().collect::<Vec<_>>();
+            state.chorded.extend(pressed);
+            state.last_release = None;
+        }
+    }
+    CallNextHookEx(None, code, wparam, lparam)
+}
+
 fn shortcut_loop(
     app: AppHandle,
     receiver: mpsc::Receiver<ServiceCommand>,
@@ -178,6 +199,9 @@ fn shortcut_loop(
         )
         .ok()
     });
+    let mouse_hook = module.and_then(|module| unsafe {
+        SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), Some(HINSTANCE(module.0)), 0).ok()
+    });
     let mut active = BTreeMap::new();
     let mut registrations: HashMap<i32, String> = HashMap::new();
     let mut running = true;
@@ -186,8 +210,12 @@ fn shortcut_loop(
         while let Ok(command) = receiver.try_recv() {
             match command {
                 ServiceCommand::Configure(next, response) => {
-                    let result =
-                        configure_shortcuts(&next, &active, &mut registrations, hook.is_some());
+                    let result = configure_shortcuts(
+                        &next,
+                        &active,
+                        &mut registrations,
+                        hook.is_some() && mouse_hook.is_some(),
+                    );
                     if result.is_ok() {
                         active = next;
                     }
@@ -219,6 +247,11 @@ fn shortcut_loop(
 
     unregister_all(&registrations);
     if let Some(hook) = hook {
+        unsafe {
+            let _ = UnhookWindowsHookEx(hook);
+        }
+    }
+    if let Some(hook) = mouse_hook {
         unsafe {
             let _ = UnhookWindowsHookEx(hook);
         }

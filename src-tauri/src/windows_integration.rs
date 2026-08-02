@@ -207,7 +207,7 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
     if context.hwnd.0.is_null() {
         return Err("No foreground application is available.".into());
     }
-    if let Ok(text) = selected_text_uia() {
+    if let Ok(text) = selected_text_uia(context.hwnd) {
         if !text.trim().is_empty() {
             return Ok((text, context));
         }
@@ -219,28 +219,38 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
     Ok((text, context))
 }
 
-fn selected_text_uia() -> Result<String, String> {
+fn selected_text_uia(expected_foreground: HWND) -> Result<String, String> {
     if UIA_WORKER_ACTIVE.swap(true, Ordering::AcqRel) {
         return Err("A previous UI Automation capture is still running.".into());
     }
+    let expected_foreground = expected_foreground.0 as usize;
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     if let Err(error) = thread::Builder::new()
         .name("cairn-uia-capture".into())
         .spawn(move || {
             let _guard = UiaWorkerGuard;
-            let _ = sender.send(selected_text_uia_sta());
+            let _ = sender.send(selected_text_uia_sta(HWND(
+                expected_foreground as *mut std::ffi::c_void,
+            )));
         })
     {
         UIA_WORKER_ACTIVE.store(false, Ordering::Release);
         return Err(error.to_string());
     }
-    receiver
+    let result = receiver
         .recv_timeout(UIA_TIMEOUT)
-        .map_err(|_| "UI Automation did not respond in time.".to_string())?
+        .map_err(|_| "UI Automation did not respond in time.".to_string())?;
+    if unsafe { GetForegroundWindow().0 as usize } != expected_foreground {
+        return Err("The foreground application changed during capture.".into());
+    }
+    result
 }
 
-fn selected_text_uia_sta() -> Result<String, String> {
+fn selected_text_uia_sta(expected_foreground: HWND) -> Result<String, String> {
     unsafe {
+        if GetForegroundWindow() != expected_foreground {
+            return Err("The foreground application changed during capture.".into());
+        }
         let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
         let result = (|| {
             let automation: IUIAutomation =

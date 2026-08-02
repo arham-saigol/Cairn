@@ -169,13 +169,14 @@ export default function App() {
     const frame = requestAnimationFrame(() => {
       if (!renderedCards.some((card) => card.id === focused))
         setFocused(renderedCards[0]?.id ?? null);
+      if (anchor && !renderedCards.some((card) => card.id === anchor)) setAnchor(null);
       setSelected(
         (current) =>
           new Set([...current].filter((id) => renderedCards.some((card) => card.id === id))),
       );
     });
     return () => cancelAnimationFrame(frame);
-  }, [renderedCards, focused]);
+  }, [anchor, renderedCards, focused]);
 
   useEffect(() => {
     const root = document.documentElement;
