@@ -412,15 +412,21 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
             restored?;
             return Err("The foreground application changed during capture.".into());
         }
-        let captured = if changed {
+        let captured = if clipboard_from_expected {
             // Give delayed-rendering clipboard owners a short moment after the sequence changes.
             thread::sleep(Duration::from_millis(20));
             read_clipboard_text()
+        } else if changed {
+            Err("Another application changed the clipboard during capture.".into())
         } else {
             Err("The selected app did not respond to the clipboard capture fallback.".into())
         };
 
-        let restored = if changed { restore_clipboard() } else { Ok(()) };
+        let restored = if clipboard_from_expected {
+            restore_clipboard()
+        } else {
+            Ok(())
+        };
         drop(original);
         OleUninitialize();
         restored?;
