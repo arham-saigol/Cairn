@@ -13,7 +13,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Card, Section } from "../types";
 import { cn, formatCapturedAt } from "../lib/utils";
 
@@ -29,34 +29,41 @@ interface CardItemProps {
   onToggleCompleted: () => void;
   onBeginEdit: () => void;
   onEndEdit: () => void;
-  onSave: (content: string) => void | Promise<void>;
+  onSave: (content: string) => Card | void | Promise<Card | void>;
   onCopy: (complete: boolean) => void | Promise<void>;
   onMerge: () => void | Promise<void>;
   onMove: (sectionId: string | null) => void | Promise<void>;
   onDelete: () => void;
 }
 
+export interface CardItemHandle {
+  commit: () => Promise<Card | undefined>;
+}
+
 const itemClass =
   "flex h-9 cursor-default select-none items-center gap-2 rounded-lg px-2.5 text-sm outline-none data-[disabled]:opacity-40 data-[highlighted]:bg-[var(--muted)]";
 
-export function CardItem({
-  card,
-  sections,
-  selected,
-  focused,
-  selectedCount,
-  editing,
-  onSelect,
-  onFocus,
-  onToggleCompleted,
-  onBeginEdit,
-  onEndEdit,
-  onSave,
-  onCopy,
-  onMerge,
-  onMove,
-  onDelete,
-}: CardItemProps) {
+export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardItem(
+  {
+    card,
+    sections,
+    selected,
+    focused,
+    selectedCount,
+    editing,
+    onSelect,
+    onFocus,
+    onToggleCompleted,
+    onBeginEdit,
+    onEndEdit,
+    onSave,
+    onCopy,
+    onMerge,
+    onMove,
+    onDelete,
+  },
+  ref,
+) {
   const [draft, setDraft] = useState(card.content);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -71,12 +78,20 @@ export function CardItem({
     }
   }, [editing]);
 
-  async function commit() {
+  async function commit(): Promise<Card | undefined> {
     const next = draft.trim();
-    if (next && next !== card.content) await onSave(next);
-    else setDraft(card.content);
+    let updated: Card | void;
+    if (next && next !== card.content) updated = await onSave(next);
+    else {
+      setDraft(card.content);
+      updated = undefined;
+    }
     onEndEdit();
+    if (updated) return updated;
+    return undefined;
   }
+
+  useImperativeHandle(ref, () => ({ commit }));
 
   const source = [card.sourceProcess, card.sourceWindowTitle].filter(Boolean).join(" · ");
 
@@ -252,4 +267,4 @@ export function CardItem({
       ) : null}
     </div>
   );
-}
+});

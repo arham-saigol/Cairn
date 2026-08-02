@@ -39,7 +39,7 @@ import {
   toggleRail,
   updateCardContent,
 } from "./api";
-import { CardItem } from "./components/CardItem";
+import { CardItem, type CardItemHandle } from "./components/CardItem";
 import { Composer } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { RailHeader } from "./components/RailHeader";
@@ -83,6 +83,7 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const toastId = useRef(0);
+  const cardRefs = useRef(new Map<string, CardItemHandle>());
   const globalActionRef = useRef<(event: GlobalShortcutEvent) => void>(() => undefined);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
@@ -207,7 +208,14 @@ export default function App() {
     async (complete: boolean, returnFocus: boolean, forcedIds?: string[]) => {
       const ids = forcedIds ?? (selected.size ? [...selected] : focused ? [focused] : []);
       const requested = new Set(ids);
-      const ordered = renderedCards.filter((card) => requested.has(card.id));
+      let copySource = renderedCards;
+      if (editing) {
+        const updated = await cardRefs.current.get(editing)?.commit();
+        if (updated) {
+          copySource = renderedCards.map((card) => (card.id === updated.id ? updated : card));
+        }
+      }
+      const ordered = copySource.filter((card) => requested.has(card.id));
       const text = copyBlock(ordered);
       if (!text) {
         notify("Select at least one card to copy.", { kind: "info" });
@@ -242,7 +250,7 @@ export default function App() {
         showError(error);
       }
     },
-    [focused, renderedCards, selected],
+    [editing, focused, renderedCards, selected],
   );
 
   function applySettings(next: AppSettings) {
@@ -679,6 +687,10 @@ export default function App() {
                               transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
                             >
                               <CardItem
+                                ref={(handle) => {
+                                  if (handle) cardRefs.current.set(card.id, handle);
+                                  else cardRefs.current.delete(card.id);
+                                }}
                                 card={card}
                                 sections={sections}
                                 selected={selected.has(card.id)}
@@ -695,6 +707,7 @@ export default function App() {
                                   setCards((current) =>
                                     current.map((item) => (item.id === card.id ? updated : item)),
                                   );
+                                  return updated;
                                 }}
                                 onCopy={(complete) => copyCards(complete, false, ids)}
                                 onMerge={doMerge}

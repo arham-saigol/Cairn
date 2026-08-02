@@ -22,7 +22,7 @@ use windows::{
                 CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
                 OpenClipboard, SetClipboardData,
             },
-            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+            Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
             Ole::{
                 OleFlushClipboard, OleGetClipboard, OleInitialize, OleSetClipboard,
                 OleUninitialize, CF_UNICODETEXT,
@@ -321,11 +321,12 @@ fn read_clipboard_text() -> Result<String, String> {
             if pointer.is_null() {
                 return Err("The copied text was not readable.".into());
             }
-            let mut length = 0usize;
-            while *pointer.add(length) != 0 {
-                length += 1;
-            }
-            let text = String::from_utf16_lossy(std::slice::from_raw_parts(pointer, length));
+            let units = std::slice::from_raw_parts(pointer, GlobalSize(memory) / size_of::<u16>());
+            let Some(length) = units.iter().position(|unit| *unit == 0) else {
+                let _ = GlobalUnlock(memory);
+                return Err("The copied text was not terminated correctly.".into());
+            };
+            let text = String::from_utf16_lossy(&units[..length]);
             let _ = GlobalUnlock(memory);
             Ok(text)
         })();
