@@ -97,6 +97,9 @@ export default function App() {
   const cardRefs = useRef(new Map<string, CardItemHandle>());
   const composerSubmitting = useRef(false);
   const quitting = useRef(false);
+  const completionQueue = useRef<Promise<void>>(Promise.resolve());
+  const completionSequence = useRef(0);
+  const pendingCompletion = useRef(new Map<string, { completed: boolean; sequence: number }>());
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
   const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -378,17 +381,30 @@ export default function App() {
     setFocused(cardId);
   }
 
-  async function toggleComplete(ids: string[]) {
+  function toggleComplete(ids: string[]) {
     const relevant = cards.filter((card) => ids.includes(card.id));
-    const completed = !relevant.every((card) => card.completed);
-    try {
-      const changed = await setCardsCompleted(ids, completed);
-      setCards((current) =>
-        current.map((card) => (changed.includes(card.id) ? { ...card, completed } : card)),
-      );
-    } catch (error) {
-      showError(error);
-    }
+    const completed = !relevant.every(
+      (card) => pendingCompletion.current.get(card.id)?.completed ?? card.completed,
+    );
+    const sequence = ++completionSequence.current;
+    ids.forEach((id) => pendingCompletion.current.set(id, { completed, sequence }));
+    completionQueue.current = completionQueue.current.then(async () => {
+      try {
+        const changed = await setCardsCompleted(ids, completed);
+        setCards((current) =>
+          current.map((card) => (changed.includes(card.id) ? { ...card, completed } : card)),
+        );
+      } catch (error) {
+        showError(error);
+      } finally {
+        ids.forEach((id) => {
+          if (pendingCompletion.current.get(id)?.sequence === sequence) {
+            pendingCompletion.current.delete(id);
+          }
+        });
+      }
+    });
+    return completionQueue.current;
   }
 
   async function doMerge() {
@@ -433,8 +449,17 @@ export default function App() {
       ...card,
       sortOrder,
     }));
+    const order = new Map(next.map((card) => [card.id, card.sortOrder]));
     void reorderCards(next.map((card) => card.id))
-      .then(() => setCards(next))
+      .then(() =>
+        setCards((current) =>
+          current
+            .map((card) =>
+              order.has(card.id) ? { ...card, sortOrder: order.get(card.id)! } : card,
+            )
+            .sort((a, b) => a.sortOrder - b.sortOrder),
+        ),
+      )
       .catch(showError);
   }
 
