@@ -130,8 +130,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
       data-card-id={card.id}
       data-selected={selected || undefined}
       tabIndex={focused ? 0 : -1}
-      role="option"
-      aria-selected={selected}
+      role="listitem"
       onFocus={onFocus}
       onClick={onSelect}
       onDoubleClick={onBeginEdit}
@@ -145,6 +144,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
         card.completed && !selected && "bg-[var(--card-complete)]",
       )}
     >
+      {selected ? <span className="sr-only">Selected card.</span> : null}
       <button
         className={cn(
           "mt-0.5 flex size-[22px] shrink-0 items-center justify-center rounded-full border outline-none transition-[border-color,background-color,color,transform] hover:scale-105 focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
