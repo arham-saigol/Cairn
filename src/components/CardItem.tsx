@@ -30,6 +30,7 @@ interface CardItemProps {
   onBeginEdit: () => void;
   onEndEdit: () => void;
   onSave: (content: string) => Card | void | Promise<Card | void>;
+  onError: (error: unknown) => void;
   onCopy: (complete: boolean) => void | Promise<void>;
   onMerge: () => void | Promise<void>;
   onMove: (sectionId: string | null) => void | Promise<void>;
@@ -57,6 +58,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
     onBeginEdit,
     onEndEdit,
     onSave,
+    onError,
     onCopy,
     onMerge,
     onMove,
@@ -141,7 +143,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
             onChange={(event) => setDraft(event.target.value)}
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
-            onBlur={() => void commit()}
+            onBlur={() => void commit().catch(onError)}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
@@ -150,7 +152,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
                 onEndEdit();
               } else if (event.key === "Enter" && event.ctrlKey) {
                 event.preventDefault();
-                void commit();
+                void commit().catch(onError);
               }
             }}
             className="min-h-12 w-full resize-none rounded-lg bg-transparent text-[13px] leading-[19px] outline-none ring-0"

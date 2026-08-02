@@ -277,7 +277,13 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
     }
     unsafe {
         OleInitialize(None).map_err(|error| error.to_string())?;
-        let original = OleGetClipboard().ok();
+        let original = match OleGetClipboard() {
+            Ok(data) => data,
+            Err(error) => {
+                OleUninitialize();
+                return Err(format!("The clipboard could not be preserved: {error}"));
+            }
+        };
         // A text snapshot is a final safety net for clipboard owners that expose a short-lived
         // IDataObject proxy. Rich formats still use the OLE object below.
         let original_text = read_clipboard_text().ok();
@@ -308,22 +314,10 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
             Err("The selected app did not respond to the clipboard capture fallback.".into())
         };
 
-        match original {
-            Some(data) => {
-                if OleSetClipboard(&data).is_ok() {
-                    let _ = OleFlushClipboard();
-                } else if let Some(text) = original_text.as_deref() {
-                    let _ = write_clipboard_text(text);
-                }
-            }
-            None => {
-                if let Some(text) = original_text.as_deref() {
-                    let _ = write_clipboard_text(text);
-                } else if open_clipboard_retry().is_ok() {
-                    let _ = EmptyClipboard();
-                    let _ = CloseClipboard();
-                }
-            }
+        if OleSetClipboard(&original).is_ok() {
+            let _ = OleFlushClipboard();
+        } else if let Some(text) = original_text.as_deref() {
+            let _ = write_clipboard_text(text);
         }
         OleUninitialize();
         captured

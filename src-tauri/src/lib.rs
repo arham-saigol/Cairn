@@ -85,13 +85,19 @@ fn save_settings(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<AppSettings, String> {
+    let previous = state.database.load_settings()?;
     // Register first. If Windows reports an OS-level conflict, the invalid shortcut is never saved.
     state.shortcuts.configure(&settings.global_shortcuts)?;
     let window = main_window(&app)?;
-    window
-        .set_always_on_top(settings.always_on_top)
-        .map_err(|error| error.to_string())?;
-    state.database.save_settings(&settings)?;
+    if let Err(error) = window.set_always_on_top(settings.always_on_top) {
+        let _ = state.shortcuts.configure(&previous.global_shortcuts);
+        return Err(error.to_string());
+    }
+    if let Err(error) = state.database.save_settings(&settings) {
+        let _ = state.shortcuts.configure(&previous.global_shortcuts);
+        let _ = window.set_always_on_top(previous.always_on_top);
+        return Err(error);
+    }
     Ok(settings)
 }
 

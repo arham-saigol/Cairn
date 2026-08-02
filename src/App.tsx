@@ -46,7 +46,6 @@ import {
   saveSettings,
   setCardsCompleted,
   showRail,
-  toggleAlwaysOnTop,
   toggleRail,
   updateCardContent,
 } from "./api";
@@ -564,12 +563,25 @@ export default function App() {
         void copyCards(true, true);
         break;
       case "toggleAlwaysOnTop":
-        void toggleAlwaysOnTop()
-          .then((alwaysOnTop) => {
-            setSettings((current) => ({ ...current, alwaysOnTop }));
-            notify(alwaysOnTop ? "Cairn is always on top" : "Always on top is off");
-          })
-          .catch(showError);
+        if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
+        settingsSaveSequence.current += 1;
+        {
+          const next = { ...settings, alwaysOnTop: !settings.alwaysOnTop };
+          void saveSettings(next)
+            .then((saved) => {
+              setSettings(saved);
+              notify(saved.alwaysOnTop ? "Cairn is always on top" : "Always on top is off");
+            })
+            .catch(async (error) => {
+              showError(error);
+              try {
+                const snapshot = await bootstrap();
+                setSettings(snapshot.settings);
+              } catch {
+                // Keep the latest in-memory settings if the database cannot be reloaded.
+              }
+            });
+        }
         break;
       case "clearAll":
         void showRail(false).then(() => setClearOpen(true));
@@ -722,6 +734,7 @@ export default function App() {
                                   );
                                   return updated;
                                 }}
+                                onError={showError}
                                 onCopy={(complete) => copyCards(complete, false, ids)}
                                 onMerge={doMerge}
                                 onMove={(target) => doMove(ids, target)}
