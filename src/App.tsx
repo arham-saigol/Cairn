@@ -327,6 +327,7 @@ export default function App() {
       await Promise.all([
         editCommit,
         settingsSaveQueue.current,
+        completionQueue.current,
         composerSubmission.current ?? Promise.resolve(),
       ]);
       await quitApp();

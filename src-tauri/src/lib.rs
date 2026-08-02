@@ -108,8 +108,9 @@ fn save_settings(
 }
 
 #[tauri::command]
-fn copy_text(text: String) -> Result<(), String> {
-    write_clipboard_text(&text)
+fn copy_text(text: String, app: tauri::AppHandle) -> Result<(), String> {
+    let owner = window_hwnd(&main_window(&app)?)?;
+    write_clipboard_text(&text, owner)
 }
 
 #[tauri::command]

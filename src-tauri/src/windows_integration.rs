@@ -342,7 +342,7 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
                 OleFlushClipboard().map_err(|error| error.to_string())
             } else {
                 if let Some(text) = original_text.as_deref() {
-                    let _ = write_clipboard_text(text);
+                    let _ = write_clipboard_text(text, expected_foreground);
                 }
                 Err("Windows could not restore the original clipboard contents.".to_string())
             }
@@ -399,7 +399,7 @@ fn wait_for_modifiers_release() -> Result<(), String> {
     Err("Release Ctrl, Alt, Shift, or Win before capturing selected text.".into())
 }
 
-pub fn write_clipboard_text(text: &str) -> Result<(), String> {
+pub fn write_clipboard_text(text: &str, owner: HWND) -> Result<(), String> {
     let mut wide: Vec<u16> = text.encode_utf16().collect();
     wide.push(0);
     unsafe {
@@ -427,7 +427,7 @@ pub fn write_clipboard_text(text: &str) -> Result<(), String> {
         }
         ptr::copy_nonoverlapping(wide.as_ptr(), target, wide.len());
         let _ = GlobalUnlock(memory);
-        if let Err(error) = open_clipboard_retry() {
+        if let Err(error) = open_clipboard_retry(Some(owner)) {
             let _ = GlobalFree(Some(memory));
             OleUninitialize();
             return Err(error);
@@ -459,7 +459,7 @@ pub fn write_clipboard_text(text: &str) -> Result<(), String> {
 
 fn read_clipboard_text() -> Result<String, String> {
     unsafe {
-        open_clipboard_retry()?;
+        open_clipboard_retry(None)?;
         let result = (|| {
             let handle =
                 GetClipboardData(CF_UNICODETEXT.0 as u32).map_err(|error| error.to_string())?;
@@ -482,10 +482,10 @@ fn read_clipboard_text() -> Result<String, String> {
     }
 }
 
-fn open_clipboard_retry() -> Result<(), String> {
+fn open_clipboard_retry(owner: Option<HWND>) -> Result<(), String> {
     let mut last_error = None;
     for _ in 0..8 {
-        match unsafe { OpenClipboard(None) } {
+        match unsafe { OpenClipboard(owner) } {
             Ok(()) => return Ok(()),
             Err(error) => {
                 last_error = Some(error.to_string());
