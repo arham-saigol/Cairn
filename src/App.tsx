@@ -100,6 +100,7 @@ export default function App() {
   const completionQueue = useRef<Promise<void>>(Promise.resolve());
   const completionSequence = useRef(0);
   const pendingCompletion = useRef(new Map<string, { completed: boolean; sequence: number }>());
+  const clearMutation = useRef<Promise<void> | null>(null);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
   const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -340,6 +341,7 @@ export default function App() {
         settingsFlush,
         completionQueue.current,
         composerSubmission.current ?? Promise.resolve(),
+        clearMutation.current ?? Promise.resolve(),
       ]);
       await quitApp();
     } catch (error) {
@@ -477,17 +479,26 @@ export default function App() {
       sortOrder,
     }));
     const order = new Map(next.map((card) => [card.id, card.sortOrder]));
+    setCards(next);
     void reorderCards(next.map((card) => card.id))
-      .then(() =>
+      .then(() => {
         setCards((current) =>
           current
             .map((card) =>
               order.has(card.id) ? { ...card, sortOrder: order.get(card.id)! } : card,
             )
             .sort((a, b) => a.sortOrder - b.sortOrder),
-        ),
-      )
-      .catch(showError);
+        );
+      })
+      .catch(async (error) => {
+        showError(error);
+        try {
+          const snapshot = await bootstrap();
+          setCards(snapshot.cards.sort((a, b) => a.sortOrder - b.sortOrder));
+        } catch {
+          // Keep the optimistic order when the database cannot be reloaded.
+        }
+      });
   }
 
   async function confirmDelete() {
@@ -503,7 +514,7 @@ export default function App() {
     }
   }
 
-  async function confirmClear() {
+  async function clearContent() {
     try {
       const backupId = await clearAll();
       setCards([]);
@@ -521,6 +532,17 @@ export default function App() {
       });
     } catch (error) {
       showError(error);
+    }
+  }
+
+  async function confirmClear() {
+    if (clearMutation.current) return clearMutation.current;
+    const operation = clearContent();
+    clearMutation.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (clearMutation.current === operation) clearMutation.current = null;
     }
   }
 

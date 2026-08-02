@@ -96,13 +96,28 @@ fn save_settings(
     state.shortcuts.configure(&settings.global_shortcuts)?;
     let window = main_window(&app)?;
     if let Err(error) = window.set_always_on_top(settings.always_on_top) {
-        let _ = state.shortcuts.configure(&previous.global_shortcuts);
+        if let Err(rollback_error) = state.shortcuts.configure(&previous.global_shortcuts) {
+            return Err(format!(
+                "{error} The previous global shortcuts could not be restored: {rollback_error}"
+            ));
+        }
         return Err(error.to_string());
     }
     if let Err(error) = state.database.save_settings(&settings) {
-        let _ = state.shortcuts.configure(&previous.global_shortcuts);
-        let _ = window.set_always_on_top(previous.always_on_top);
-        return Err(error);
+        let mut rollback_errors = Vec::new();
+        if let Err(rollback_error) = state.shortcuts.configure(&previous.global_shortcuts) {
+            rollback_errors.push(format!("global shortcuts: {rollback_error}"));
+        }
+        if let Err(rollback_error) = window.set_always_on_top(previous.always_on_top) {
+            rollback_errors.push(format!("always-on-top state: {rollback_error}"));
+        }
+        if rollback_errors.is_empty() {
+            return Err(error);
+        }
+        return Err(format!(
+            "{error} The previous settings could not be fully restored ({}).",
+            rollback_errors.join("; ")
+        ));
     }
     Ok(settings)
 }

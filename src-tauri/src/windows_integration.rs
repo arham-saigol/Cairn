@@ -58,6 +58,7 @@ const MIN_RAIL_HEIGHT: i32 = 480;
 const UIA_TIMEOUT: Duration = Duration::from_millis(1500);
 static UIA_WORKER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CLIPBOARD_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+const UIA_BUSY_ERROR: &str = "A previous UI Automation capture is still running.";
 
 struct UiaWorkerGuard;
 
@@ -207,9 +208,11 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
     if context.hwnd.0.is_null() {
         return Err("No foreground application is available.".into());
     }
-    if let Ok(text) = selected_text_uia(context.hwnd) {
-        if !text.trim().is_empty() {
-            return Ok((text, context));
+    match selected_text_uia(context.hwnd) {
+        Ok(text) if !text.trim().is_empty() => return Ok((text, context)),
+        Err(error) if error == UIA_BUSY_ERROR => return Err(error),
+        _ => {
+            // Fall back to a synthetic copy when UI Automation has no usable selection.
         }
     }
     let text = selected_text_clipboard_fallback(context.hwnd)?;
@@ -221,7 +224,7 @@ pub fn selected_text() -> Result<(String, SourceContext), String> {
 
 fn selected_text_uia(expected_foreground: HWND) -> Result<String, String> {
     if UIA_WORKER_ACTIVE.swap(true, Ordering::AcqRel) {
-        return Err("A previous UI Automation capture is still running.".into());
+        return Err(UIA_BUSY_ERROR.into());
     }
     let expected_foreground = expected_foreground.0 as usize;
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
