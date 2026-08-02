@@ -96,6 +96,7 @@ export default function App() {
   const toastId = useRef(0);
   const cardRefs = useRef(new Map<string, CardItemHandle>());
   const composerSubmitting = useRef(false);
+  const quitting = useRef(false);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsSaveSequence = useRef(0);
   const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -283,6 +284,7 @@ export default function App() {
     if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
     const sequence = ++settingsSaveSequence.current;
     settingsSaveTimer.current = setTimeout(() => {
+      settingsSaveTimer.current = null;
       settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
         try {
           await saveSettings(next);
@@ -298,6 +300,29 @@ export default function App() {
         }
       });
     }, 100);
+  }
+
+  async function quit() {
+    if (quitting.current) return;
+    quitting.current = true;
+    try {
+      const editCommit = editing
+        ? (cardRefs.current.get(editing)?.commit() ?? Promise.resolve(undefined))
+        : Promise.resolve(undefined);
+      if (settingsSaveTimer.current) {
+        clearTimeout(settingsSaveTimer.current);
+        settingsSaveTimer.current = null;
+        settingsSaveSequence.current += 1;
+        settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
+          await saveSettings(settings);
+        });
+      }
+      await Promise.all([editCommit, settingsSaveQueue.current]);
+      await quitApp();
+    } catch (error) {
+      quitting.current = false;
+      showError(error);
+    }
   }
 
   async function submitComposer() {
@@ -673,7 +698,7 @@ export default function App() {
           setSettingsOpen(true);
         }}
         onClear={() => setClearOpen(true)}
-        onQuit={() => void quitApp().catch(showError)}
+        onQuit={() => void quit()}
       />
 
       <section

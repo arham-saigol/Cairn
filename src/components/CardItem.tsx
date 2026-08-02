@@ -69,6 +69,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
   const [draft, setDraft] = useState(card.content);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const commitPromiseRef = useRef<Promise<Card | undefined> | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
@@ -81,8 +82,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
     }
   }, [editing]);
 
-  async function commit(): Promise<Card | undefined> {
-    if (savingRef.current) return undefined;
+  async function commitDraft(): Promise<Card | undefined> {
     const next = draft.trim();
     let updated: Card | void;
     if (next && next !== card.content) {
@@ -103,6 +103,17 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
     onEndEdit();
     if (updated) return updated;
     return undefined;
+  }
+
+  async function commit(): Promise<Card | undefined> {
+    if (commitPromiseRef.current) return commitPromiseRef.current;
+    const operation = commitDraft();
+    commitPromiseRef.current = operation;
+    try {
+      return await operation;
+    } finally {
+      if (commitPromiseRef.current === operation) commitPromiseRef.current = null;
+    }
   }
 
   useImperativeHandle(ref, () => ({ commit }));

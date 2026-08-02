@@ -337,6 +337,16 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
         // A text snapshot is a final safety net for clipboard owners that expose a short-lived
         // IDataObject proxy. Rich formats still use the OLE object below.
         let original_text = read_clipboard_text().ok();
+        let restore_clipboard = || {
+            if OleSetClipboard(&original).is_ok() {
+                OleFlushClipboard().map_err(|error| error.to_string())
+            } else {
+                if let Some(text) = original_text.as_deref() {
+                    let _ = write_clipboard_text(text);
+                }
+                Err("Windows could not restore the original clipboard contents.".to_string())
+            }
+        };
         if let Err(error) = wait_for_modifiers_release() {
             OleUninitialize();
             return Err(error);
@@ -347,7 +357,9 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
         }
         let sequence = GetClipboardSequenceNumber();
         if let Err(error) = send_ctrl_c() {
+            let restored = restore_clipboard();
             OleUninitialize();
+            restored?;
             return Err(error);
         }
 
@@ -364,14 +376,7 @@ fn clipboard_fallback_sta(expected_foreground: HWND) -> Result<String, String> {
             Err("The selected app did not respond to the clipboard capture fallback.".into())
         };
 
-        let restored = if OleSetClipboard(&original).is_ok() {
-            OleFlushClipboard().map_err(|error| error.to_string())
-        } else {
-            if let Some(text) = original_text.as_deref() {
-                let _ = write_clipboard_text(text);
-            }
-            Err("Windows could not restore the original clipboard contents.".to_string())
-        };
+        let restored = restore_clipboard();
         OleUninitialize();
         restored?;
         captured
