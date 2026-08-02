@@ -233,6 +233,15 @@ export default function App() {
     return focused ? [focused] : [];
   }
 
+  function queueCompletionUpdate(ids: string[], completed: boolean) {
+    const operation = completionQueue.current.then(() => setCardsCompleted(ids, completed));
+    completionQueue.current = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   const copyCards = useCallback(
     async (complete: boolean, returnFocus: boolean, forcedIds?: string[]) => {
       try {
@@ -255,7 +264,7 @@ export default function App() {
         await copyText(text);
         let changed: string[] = [];
         if (complete) {
-          changed = await setCardsCompleted(ids, true);
+          changed = await queueCompletionUpdate(ids, true);
           setCards((current) =>
             current.map((card) =>
               changed.includes(card.id) ? { ...card, completed: true } : card,
@@ -266,7 +275,7 @@ export default function App() {
           actionLabel: changed.length ? "Undo" : undefined,
           onAction: changed.length
             ? async () => {
-                await setCardsCompleted(changed, false);
+                await queueCompletionUpdate(changed, false);
                 setCards((current) =>
                   current.map((card) =>
                     changed.includes(card.id) ? { ...card, completed: false } : card,
@@ -316,17 +325,19 @@ export default function App() {
       const editCommit = editing
         ? (cardRefs.current.get(editing)?.commit() ?? Promise.resolve(undefined))
         : Promise.resolve(undefined);
+      let settingsFlush = settingsSaveQueue.current;
       if (settingsSaveTimer.current) {
         clearTimeout(settingsSaveTimer.current);
         settingsSaveTimer.current = null;
         settingsSaveSequence.current += 1;
-        settingsSaveQueue.current = settingsSaveQueue.current.then(async () => {
+        settingsFlush = settingsSaveQueue.current.then(async () => {
           await saveSettings(settings);
         });
+        settingsSaveQueue.current = settingsFlush.catch(() => undefined);
       }
       await Promise.all([
         editCommit,
-        settingsSaveQueue.current,
+        settingsFlush,
         completionQueue.current,
         composerSubmission.current ?? Promise.resolve(),
       ]);
