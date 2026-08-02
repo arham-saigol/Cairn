@@ -161,9 +161,10 @@ export async function deleteCards(ids: string[]) {
 
 export async function mergeCards(ids: string[]): Promise<Card> {
   if (isTauri) return command<Card>("merge_cards", { ids });
-  const selected = mockState.cards
-    .filter((card) => ids.includes(card.id))
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const selected = ids.flatMap((id) => {
+    const card = mockState.cards.find((item) => item.id === id);
+    return card ? [card] : [];
+  });
   const first = selected[0];
   const merged: Card = {
     ...first,

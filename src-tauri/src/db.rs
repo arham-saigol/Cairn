@@ -262,11 +262,11 @@ impl Database {
             return Err("Select two or more cards to merge.".into());
         }
         let mut connection = self.connection.lock();
-        let mut selected: Vec<Card> = list_cards(&connection)?
-            .into_iter()
-            .filter(|card| ids.contains(&card.id))
+        let cards = list_cards(&connection)?;
+        let selected: Vec<Card> = ids
+            .iter()
+            .filter_map(|id| cards.iter().find(|card| card.id == *id).cloned())
             .collect();
-        selected.sort_by_key(|card| card.sort_order);
         if selected.len() < 2 {
             return Err("Some selected cards no longer exist.".into());
         }
@@ -535,12 +535,12 @@ mod tests {
     }
 
     #[test]
-    fn merge_preserves_display_order() {
+    fn merge_preserves_requested_order() {
         let db = database();
         let first = db.create_note("Alpha", None, None, None).unwrap();
         let second = db.create_note("Beta", None, None, None).unwrap();
         let merged = db.merge_cards(&[second.id, first.id]).unwrap();
-        assert_eq!(merged.content, "Alpha\n\nBeta");
+        assert_eq!(merged.content, "Beta\n\nAlpha");
         assert_eq!(db.bootstrap().unwrap().cards.len(), 1);
     }
 

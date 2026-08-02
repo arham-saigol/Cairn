@@ -71,6 +71,7 @@ impl Drop for ShortcutService {
 struct TapState {
     actions: HashMap<u32, String>,
     pressed: HashSet<u32>,
+    chorded: HashSet<u32>,
     last_release: Option<(u32, Instant)>,
     sender: mpsc::Sender<String>,
 }
@@ -87,21 +88,37 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             let key_up = wparam.0 as u32 == WM_KEYUP || wparam.0 as u32 == WM_SYSKEYUP;
             if let Some(key) = key {
                 if key_down {
-                    state.pressed.insert(key);
-                } else if key_up && state.pressed.remove(&key) {
-                    let now = Instant::now();
-                    if state.last_release.is_some_and(|(previous, at)| {
-                        previous == key && now.duration_since(at) <= Duration::from_millis(420)
-                    }) {
-                        if let Some(action) = state.actions.get(&key).cloned() {
-                            let _ = state.sender.send(action);
+                    if !state.pressed.contains(&key) {
+                        let has_other_modifier = !state.pressed.is_empty();
+                        if has_other_modifier {
+                            let pressed = state.pressed.iter().copied().collect::<Vec<_>>();
+                            state.chorded.extend(pressed);
+                            state.chorded.insert(key);
+                        } else {
+                            state.chorded.remove(&key);
                         }
+                        state.pressed.insert(key);
+                    }
+                } else if key_up && state.pressed.remove(&key) {
+                    if state.chorded.remove(&key) {
                         state.last_release = None;
                     } else {
-                        state.last_release = Some((key, now));
+                        let now = Instant::now();
+                        if state.last_release.is_some_and(|(previous, at)| {
+                            previous == key && now.duration_since(at) <= Duration::from_millis(420)
+                        }) {
+                            if let Some(action) = state.actions.get(&key).cloned() {
+                                let _ = state.sender.send(action);
+                            }
+                            state.last_release = None;
+                        } else {
+                            state.last_release = Some((key, now));
+                        }
                     }
                 }
             } else if key_down {
+                let pressed = state.pressed.iter().copied().collect::<Vec<_>>();
+                state.chorded.extend(pressed);
                 state.last_release = None;
             }
         }
@@ -114,6 +131,7 @@ fn shortcut_loop(app: AppHandle, receiver: mpsc::Receiver<ServiceCommand>) {
     let _ = TAP_STATE.set(Mutex::new(TapState {
         actions: HashMap::new(),
         pressed: HashSet::new(),
+        chorded: HashSet::new(),
         last_release: None,
         sender: tap_sender,
     }));
@@ -188,7 +206,11 @@ fn configure_shortcuts(
     unregister_all(registrations);
     registrations.clear();
     if let Some(state) = TAP_STATE.get() {
-        state.lock().actions.clear();
+        let mut state = state.lock();
+        state.actions.clear();
+        state.pressed.clear();
+        state.chorded.clear();
+        state.last_release = None;
     }
 
     match register_map(next, registrations, hook_available) {
@@ -197,7 +219,11 @@ fn configure_shortcuts(
             unregister_all(registrations);
             registrations.clear();
             if let Some(state) = TAP_STATE.get() {
-                state.lock().actions.clear();
+                let mut state = state.lock();
+                state.actions.clear();
+                state.pressed.clear();
+                state.chorded.clear();
+                state.last_release = None;
             }
             let _ = register_map(previous, registrations, hook_available);
             Err(error)

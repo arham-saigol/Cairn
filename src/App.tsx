@@ -146,13 +146,16 @@ export default function App() {
       .filter((group) => group.cards.length > 0);
   }, [sectionId, sections, visibleCards]);
 
+  const renderedCards = useMemo(() => groups.flatMap((group) => group.cards), [groups]);
+
   useEffect(() => {
-    if (!visibleCards.some((card) => card.id === focused)) setFocused(visibleCards[0]?.id ?? null);
+    if (!renderedCards.some((card) => card.id === focused))
+      setFocused(renderedCards[0]?.id ?? null);
     setSelected(
       (current) =>
-        new Set([...current].filter((id) => visibleCards.some((card) => card.id === id))),
+        new Set([...current].filter((id) => renderedCards.some((card) => card.id === id))),
     );
-  }, [visibleCards, focused]);
+  }, [renderedCards, focused]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -191,9 +194,12 @@ export default function App() {
   }
 
   function actionIds(cardId?: string) {
-    if (cardId && selected.has(cardId)) return [...selected];
+    const orderedSelection = renderedCards
+      .filter((card) => selected.has(card.id))
+      .map((card) => card.id);
+    if (cardId && selected.has(cardId)) return orderedSelection;
     if (cardId) return [cardId];
-    if (selected.size) return [...selected];
+    if (orderedSelection.length) return orderedSelection;
     return focused ? [focused] : [];
   }
 
@@ -201,9 +207,7 @@ export default function App() {
     async (complete: boolean, returnFocus: boolean, forcedIds?: string[]) => {
       const ids = forcedIds ?? (selected.size ? [...selected] : focused ? [focused] : []);
       const requested = new Set(ids);
-      const ordered = groups.flatMap((group) =>
-        group.cards.filter((card) => requested.has(card.id)),
-      );
+      const ordered = renderedCards.filter((card) => requested.has(card.id));
       const text = copyBlock(ordered);
       if (!text) {
         notify("Select at least one card to copy.", { kind: "info" });
@@ -238,7 +242,7 @@ export default function App() {
         showError(error);
       }
     },
-    [focused, groups, selected],
+    [focused, renderedCards, selected],
   );
 
   function applySettings(next: AppSettings) {
@@ -285,12 +289,12 @@ export default function App() {
   }
 
   function selectCard(cardId: string, event: React.MouseEvent) {
-    const index = visibleCards.findIndex((card) => card.id === cardId);
+    const index = renderedCards.findIndex((card) => card.id === cardId);
     if (event.shiftKey && anchor) {
-      const anchorIndex = visibleCards.findIndex((card) => card.id === anchor);
+      const anchorIndex = renderedCards.findIndex((card) => card.id === anchor);
       if (anchorIndex >= 0) {
         const [start, end] = [anchorIndex, index].sort((a, b) => a - b);
-        setSelected(new Set(visibleCards.slice(start, end + 1).map((card) => card.id)));
+        setSelected(new Set(renderedCards.slice(start, end + 1).map((card) => card.id)));
       }
     } else if (event.ctrlKey || event.metaKey) {
       setSelected((current) => {
@@ -430,8 +434,8 @@ export default function App() {
       }
       if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "a") {
         event.preventDefault();
-        setSelected(new Set(visibleCards.map((card) => card.id)));
-        setAnchor(visibleCards[0]?.id ?? null);
+        setSelected(new Set(renderedCards.map((card) => card.id)));
+        setAnchor(renderedCards[0]?.id ?? null);
         return;
       }
       if (shortcutMatches(event, settings.appShortcuts.mergeSelected)) {
@@ -471,18 +475,18 @@ export default function App() {
         const direction = event.key === "ArrowDown" ? 1 : -1;
         const currentIndex = Math.max(
           0,
-          visibleCards.findIndex((card) => card.id === focused),
+          renderedCards.findIndex((card) => card.id === focused),
         );
-        const nextIndex = Math.min(visibleCards.length - 1, Math.max(0, currentIndex + direction));
-        const next = visibleCards[nextIndex];
+        const nextIndex = Math.min(renderedCards.length - 1, Math.max(0, currentIndex + direction));
+        const next = renderedCards[nextIndex];
         if (!next) return;
         setFocused(next.id);
         if (event.shiftKey) {
-          const anchorId = anchor ?? visibleCards[currentIndex]?.id ?? next.id;
-          const anchorIndex = visibleCards.findIndex((card) => card.id === anchorId);
+          const anchorId = anchor ?? renderedCards[currentIndex]?.id ?? next.id;
+          const anchorIndex = renderedCards.findIndex((card) => card.id === anchorId);
           const [start, end] = [anchorIndex, nextIndex].sort((a, b) => a - b);
           setAnchor(anchorId);
-          setSelected(new Set(visibleCards.slice(start, end + 1).map((card) => card.id)));
+          setSelected(new Set(renderedCards.slice(start, end + 1).map((card) => card.id)));
         } else {
           setSelected(new Set([next.id]));
           setAnchor(next.id);
@@ -518,7 +522,7 @@ export default function App() {
     settings.appShortcuts,
     settingsOpen,
     moveOpen,
-    visibleCards,
+    renderedCards,
   ]);
 
   globalActionRef.current = (event) => {
@@ -643,7 +647,7 @@ export default function App() {
             onDragEnd={handleDragEnd}
           >
             <SortableContext
-              items={visibleCards.map((card) => card.id)}
+              items={renderedCards.map((card) => card.id)}
               strategy={verticalListSortingStrategy}
             >
               <div className="pb-3">

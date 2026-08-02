@@ -221,7 +221,10 @@ fn clipboard_fallback_sta() -> Result<String, String> {
         // A text snapshot is a final safety net for clipboard owners that expose a short-lived
         // IDataObject proxy. Rich formats still use the OLE object below.
         let original_text = read_clipboard_text().ok();
-        wait_for_modifiers_release();
+        if let Err(error) = wait_for_modifiers_release() {
+            OleUninitialize();
+            return Err(error);
+        }
         let sequence = GetClipboardSequenceNumber();
         if let Err(error) = send_ctrl_c() {
             OleUninitialize();
@@ -263,7 +266,7 @@ fn clipboard_fallback_sta() -> Result<String, String> {
     }
 }
 
-fn wait_for_modifiers_release() {
+fn wait_for_modifiers_release() -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_millis(650);
     while Instant::now() < deadline {
         let pressed = unsafe {
@@ -272,10 +275,11 @@ fn wait_for_modifiers_release() {
                 .any(|key| GetAsyncKeyState(key.0 as i32) < 0)
         };
         if !pressed {
-            return;
+            return Ok(());
         }
         thread::sleep(Duration::from_millis(10));
     }
+    Err("Release Ctrl, Alt, or Shift before capturing selected text.".into())
 }
 
 pub fn write_clipboard_text(text: &str) -> Result<(), String> {
