@@ -329,6 +329,7 @@ export default function App() {
   }
 
   function applySettings(next: AppSettings) {
+    if (quitting.current) return;
     if (pendingAlwaysOnTop.current) {
       next = { ...next, alwaysOnTop: pendingAlwaysOnTop.current.value };
     }
@@ -710,12 +711,13 @@ export default function App() {
   }, []);
 
   const handleGlobalAction = useEffectEvent((event: GlobalShortcutEvent) => {
-    if (settingsOpen) return;
+    if (settingsOpen || quitting.current) return;
     switch (event.action) {
       case "showHide":
         void toggleRail();
         break;
       case "captureSelection":
+        if (loading) break;
         void trackMutation(captureSelection())
           .then((card) => {
             setCards((current) => [...current, card]);
