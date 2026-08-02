@@ -107,6 +107,7 @@ export const CardItem = forwardRef<CardItemHandle, CardItemProps>(function CardI
 
   async function commit(): Promise<Card | undefined> {
     if (commitPromiseRef.current) return commitPromiseRef.current;
+    if (savingRef.current) return undefined;
     const operation = commitDraft();
     commitPromiseRef.current = operation;
     try {
