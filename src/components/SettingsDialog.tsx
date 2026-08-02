@@ -261,6 +261,7 @@ export function SettingsDialog({
 }) {
   const [tab, setTab] = useState(initialTab);
   const [recorder, setRecorder] = useState<RecorderTarget | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   const recorderDefault = useMemo(() => {
     if (!recorder) return null;
@@ -271,6 +272,27 @@ export function SettingsDialog({
 
   function setAppearance(patch: Partial<AppSettings["appearance"]>) {
     onChange({ ...settings, appearance: { ...settings.appearance, ...patch } });
+  }
+
+  function restoreShortcutDefaults(scope: "global" | "app") {
+    const defaults =
+      scope === "global" ? DEFAULT_SETTINGS.globalShortcuts : DEFAULT_SETTINGS.appShortcuts;
+    const next: AppSettings = {
+      ...settings,
+      ...(scope === "global"
+        ? { globalShortcuts: structuredClone(DEFAULT_SETTINGS.globalShortcuts) }
+        : { appShortcuts: structuredClone(DEFAULT_SETTINGS.appShortcuts) }),
+    };
+    for (const [id, value] of Object.entries(defaults)) {
+      if (!value) continue;
+      const error = validateShortcut(value, scope, id, next);
+      if (error) {
+        setResetError(`Defaults could not be restored: ${error}`);
+        return;
+      }
+    }
+    setResetError(null);
+    onChange(next);
   }
 
   function saveRecorder(value: string | null) {
@@ -485,12 +507,7 @@ export function SettingsDialog({
                   variant="ghost"
                   size="sm"
                   className="mb-6 mt-2 w-full text-[var(--muted-text)]"
-                  onClick={() =>
-                    onChange({
-                      ...settings,
-                      globalShortcuts: structuredClone(DEFAULT_SETTINGS.globalShortcuts),
-                    })
-                  }
+                  onClick={() => restoreShortcutDefaults("global")}
                 >
                   <RotateCcw className="mr-2 size-3.5" /> Restore global defaults
                 </Button>
@@ -517,15 +534,15 @@ export function SettingsDialog({
                   variant="ghost"
                   size="sm"
                   className="mb-6 mt-2 w-full text-[var(--muted-text)]"
-                  onClick={() =>
-                    onChange({
-                      ...settings,
-                      appShortcuts: structuredClone(DEFAULT_SETTINGS.appShortcuts),
-                    })
-                  }
+                  onClick={() => restoreShortcutDefaults("app")}
                 >
                   <RotateCcw className="mr-2 size-3.5" /> Restore Cairn defaults
                 </Button>
+                {resetError ? (
+                  <p className="mb-4 px-2 text-[11px] leading-4 text-[var(--danger)]" role="alert">
+                    {resetError}
+                  </p>
+                ) : null}
 
                 <div className="px-1">
                   <SettingHeader
